@@ -759,7 +759,10 @@ def convenio_detalhes(conv):
         pdf.set_font('Arial', '', 10)
         pdf.cell(pdf.get_string_width('Fiscal: '), 10, 'Fiscal: ', 0, 0)
         pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 10, dadosSEI.fiscal, 0, 0)
+        if dadosSEI.fiscal:
+            pdf.cell(0, 10, dadosSEI.fiscal, 0, 0)
+        else:
+            pdf.cell(0, 10, 'N.I.', 0, 0)
         pdf.ln(7)
 
     pdf.set_font('Arial', '', 10)

@@ -162,14 +162,7 @@ def lista_acordos(lista,coord):
     """
     +---------------------------------------------------------------------------------------+
     |Apresenta uma lista dos acordos por edição do programa.                                |
-    |                                                                                       |
-    |Ao varrer a tabela de acordos, resgatando os cadastrados na edição consultada, são     |
-    |feitas consultas aos dados envidados pela COSAO e também aos                           |
-    |dados sobre os respectivos processos-mãe relacionados a cada acordo para que se        |
-    |calcule a quantidade de bolsistas contemplados (CPFs), a quantidade de bolsas          |
-    |implementadas (processos-filho), a quantidade de mensalidades pagas, o valor pago,     |
-    |o valor a pagar e o saldo (valor alocado pelo CNPq no acordo - valor pago - valor a    |
-    |pagar).                                                                                |
+    |                                                                                       |                                                                                |
     |                                                                                       |
     |No topo da tela há a opção de se inserir um novo acordo e o número sequencial de cada  |
     |acordo (#), ao ser clicado, permite que seus dados possam ser editados.                |
@@ -897,8 +890,6 @@ def update(acordo_id,lista):
     else:
         form.unid.data = acordo.unidade_cnpq  
     form.situacao.data     = acordo.situ
-    print ('** acordo.situ: ',acordo.situ, type(acordo.situ))
-    print ('** form.situacao.data: ', form.situacao.data, type(form.situacao.data))
     form.capital.data  = locale.currency( acordo.capital, symbol=False, grouping = True )
     form.custeio.data  = locale.currency( acordo.custeio, symbol=False, grouping = True )
     form.bolsas.data   = locale.currency( acordo.bolsas, symbol=False, grouping = True )
@@ -1223,6 +1214,10 @@ def cria_acordo():
     form = AcordoForm()
 
     form.unid.choices = lista_coords
+    
+    form.situacao.choices=[('',''),
+                           ('Preparação','Preparação'),
+                           ('Assinado','Assinado')]
 
     if form.validate_on_submit():
 

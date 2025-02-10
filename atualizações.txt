@@ -1,5 +1,17 @@
 ## Atualizações ##
 
+10/02/2025
+Correção em dadosSEI.fical na geração de pdf, o que impedia a consulta a alguns convênios.
+v5.0.13
+
+30/10/2024
+Correção no campo situação na criação de um acordo.
+v5.0.12
+
+26/09/2024
+Correção na carga DW
+v5.0.9 v5.0.10 v5.0.11
+
 13/09/2024
 Cálculo de valor comprometido em acordos.
 v5.0.8

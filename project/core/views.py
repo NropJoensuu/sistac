@@ -421,36 +421,35 @@ def chamadas_DW():
                                 # para cada processo mãe, varre processos filho encontrados no DW
                                 dic_fil_cha = {}
                                 for fil_cha in filhos_chamadas:
+                                    
+                                    # carrega dicionário com valores obtidos do processo filho
+                                    dic_fil_cha['COD_PROGRAMA']   = fil_cha[0]
+                                    dic_fil_cha['NOME_CHAMADA']   = fil_cha[1]
+                                    dic_fil_cha['PROCESSO']       = fil_cha[2]
+                                    dic_fil_cha['PROCESSO_MAE']   = fil_cha[3]
+                                    dic_fil_cha['INICIO']         = fil_cha[4]
+                                    dic_fil_cha['FIM']            = fil_cha[5]
+                                    dic_fil_cha['SIT']            = fil_cha[6]
+                                    dic_fil_cha['SIT_DETALHE']    = fil_cha[7]
+                                    dic_fil_cha['ESTADO_FOMENTO'] = fil_cha[8]
+                                    dic_fil_cha['TITULO']         = fil_cha[9]
+                                    dic_fil_cha['CPF']            = fil_cha[10]
+                                    dic_fil_cha['PESSOA']         = fil_cha[11]
+                                    dic_fil_cha['MODAL']          = fil_cha[12]
+                                    dic_fil_cha['NIVEL']          = fil_cha[13]
+                                    dic_fil_cha['QTD_BOLSAS']     = fil_cha[14]
+                                    dic_fil_cha['PAGO_BOLSAS']    = fil_cha[15]
+                                    dic_fil_cha['PAGO_CAPITAL']   = fil_cha[16]
+                                    dic_fil_cha['PAGO_CUSTEIO']   = fil_cha[17]
+                                    dic_fil_cha['DTA_CARGA']      = fil_cha[18]
 
                                     if fil_cha[3] == pro_cha[2]:  # grava filho se ele for do processo mãe da vez
 
-                                        # carrega dicionário com valores obtidos do processo filho
-                                        dic_fil_cha['COD_PROGRAMA']   = fil_cha[0]
-                                        dic_fil_cha['NOME_CHAMADA']   = fil_cha[1]
-                                        dic_fil_cha['PROCESSO']       = fil_cha[2]
-                                        dic_fil_cha['PROCESSO_MAE']   = fil_cha[3]
-                                        dic_fil_cha['INICIO']         = fil_cha[4]
-                                        dic_fil_cha['FIM']            = fil_cha[5]
-                                        dic_fil_cha['SIT']            = fil_cha[6]
-                                        dic_fil_cha['SIT_DETALHE']    = fil_cha[7]
-                                        dic_fil_cha['ESTADO_FOMENTO'] = fil_cha[8]
-                                        dic_fil_cha['TITULO']         = fil_cha[9]
-                                        dic_fil_cha['CPF']            = fil_cha[10]
-                                        dic_fil_cha['PESSOA']         = fil_cha[11]
-                                        dic_fil_cha['MODAL']          = fil_cha[12]
-                                        dic_fil_cha['NIVEL']          = fil_cha[13]
-                                        dic_fil_cha['QTD_BOLSAS']     = fil_cha[14]
-                                        dic_fil_cha['PAGO_BOLSAS']    = fil_cha[15]
-                                        dic_fil_cha['PAGO_CAPITAL']   = fil_cha[16]
-                                        dic_fil_cha['PAGO_CUSTEIO']   = fil_cha[17]
-                                        dic_fil_cha['DTA_CARGA']      = fil_cha[18]
-
-                                        
                                         # ajusta conteúdo de situação caso seja nulo
                                         if dic_fil_cha['SIT']:
-                                            dic_fil_cha['SIT']
+                                            situ_filho = dic_fil_cha['SIT']
                                             if dic_fil_cha['SIT_DETALHE']:
-                                                situ_filho = situ_filho + ' ' + dic_fil_cha['SIT_DETALHE']
+                                                situ_filho = str(situ_filho) + ' ' + dic_fil_cha['SIT_DETALHE']
                                         elif dic_fil_cha['ESTADO_FOMENTO']:
                                             situ_filho = dic_fil_cha['ESTADO_FOMENTO']
                                         else: 
@@ -477,7 +476,7 @@ def chamadas_DW():
                                          # aqui calcula-se a quantidade de meses entre a data da carga e o final da vigencia do filho
                                          # esta quandidade é inserida no dicionário para ser gravada na tabela ao final
                                         if situ_filho == 'ATIVACAO Em folha de pagamento' and dic_fil_cha['FIM'] >= dic_fil_cha['DTA_CARGA']:
-                                            dic_fil_cha['MENS_APAGAR'] = (dic_fil_cha['FIM'].year  - dic_fil_cha['DTA_CARGA']) * 12 +\
+                                            dic_fil_cha['MENS_APAGAR'] = (dic_fil_cha['FIM'].year  - dic_fil_cha['DTA_CARGA'].year) * 12 +\
                                                         (dic_fil_cha['FIM'].month - dic_fil_cha['DTA_CARGA'].month)
                                             if dic_fil_cha['MENS_APAGAR'] < 0:
                                                 dic_fil_cha['MENS_APAGAR'] = 0
