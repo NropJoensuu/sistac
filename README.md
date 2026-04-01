@@ -1,6 +1,6 @@
-# SISTAC — Sistema de Gestão de Acordos
+# SISTAC
 
-Sistema de gerenciamento de TEDs, acordos e convênios.
+Sistema de gerenciamento de TEDs, acordos e convênios. (iniciado com COPES-Cimei)
 
 ## Descrição
 
