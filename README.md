@@ -1,4 +1,4 @@
-# SISTAC
+# SISTAC — Sistema de Gestão de Acordos
 
 Sistema de gerenciamento de TEDs, acordos e convênios.
 
