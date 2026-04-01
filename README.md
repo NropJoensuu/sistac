@@ -34,3 +34,10 @@ python app.py
 ## Versão atual
 
 v5.0.13
+
+## Como contribuir
+1. Faça um fork do repositório
+2. Crie um branch para sua funcionalidade (`git checkout -b feat/minha-funcionalidade`)
+3. Faça suas alterações e commit (`git commit -m "feat: descrição da mudança"`)
+4. Envie para o GitHub (`git push origin feat/minha-funcionalidade`)
+5. Abra um Pull Request
