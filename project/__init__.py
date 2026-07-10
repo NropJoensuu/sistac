@@ -6,6 +6,7 @@ import locale
 import datetime
 from flask import Flask,render_template,url_for,redirect
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from flask_login import LoginManager
 from flask_mail import Mail
 
@@ -25,6 +26,8 @@ app.config.from_pyfile('flask.cfg')
 app.static_url_path=app.config.get('STATIC_PATH')
 
 db = SQLAlchemy(app)
+
+migrate = Migrate(app, db)
 
 mail = Mail(app)
 
