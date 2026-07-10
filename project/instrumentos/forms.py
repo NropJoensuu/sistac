@@ -24,12 +24,7 @@ from project.models import Coords
 # form para inclusão ou alteração de um instrumento
 class InstrumentoForm(FlaskForm):
 
-    coords = db.session.query(Coords.sigla)\
-                      .order_by(Coords.sigla).all()
-    lista_coords = [(c[0],c[0]) for c in coords]
-    lista_coords.insert(0,('',''))
-
-    coord        = SelectField('Coordenação:',choices= lista_coords)
+    coord        = SelectField('Coordenação:')
     nome         = StringField('Título:',validators=[DataRequired(message="Informe um título para o instrumento!")])
     contraparte  = StringField('Contraparte:',validators=[DataRequired(message="Informe a contraparte!")])
     sei          = StringField('Número SEI:',validators=[DataRequired(message="Informe o Programa!")]) # incluir regex para sei
@@ -40,14 +35,25 @@ class InstrumentoForm(FlaskForm):
 
     submit       = SubmitField('Registrar')
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        coords = db.session.query(Coords.sigla)\
+                          .order_by(Coords.sigla).all()
+        lista_coords = [(c[0],c[0]) for c in coords]
+        lista_coords.insert(0,('',''))
+        self.coord.choices = lista_coords
+
 #
 # form para escolher a coordenação na lista de instrumentos
 class ListaForm(FlaskForm):
 
-    coords = db.session.query(Coords.sigla)\
-                      .order_by(Coords.sigla).all()
-    lista_coords = [(c[0],c[0]) for c in coords]
-    lista_coords.insert(0,('',''))
-
-    coord        = SelectField('Coordenação:',choices= lista_coords)
+    coord        = SelectField('Coordenação:')
     submit       = SubmitField('Filtrar coordenação')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        coords = db.session.query(Coords.sigla)\
+                          .order_by(Coords.sigla).all()
+        lista_coords = [(c[0],c[0]) for c in coords]
+        lista_coords.insert(0,('',''))
+        self.coord.choices = lista_coords

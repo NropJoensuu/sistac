@@ -26,17 +26,20 @@ from project.models import Programa_Interesse, User
 
 class SEIForm(FlaskForm):
 
-    pessoal = db.session.query(User.username)\
-                        .filter(User.ativo == 1)\
-                        .order_by(User.username).all()
-    lista_pessoal = [(p[0],p[0]) for p in pessoal]
-    lista_pessoal.insert(0,('',''))
-
     nr_convenio = IntegerField('SICONV:', render_kw={'readonly': True})
     sei         = StringField('SEI:',validators=[DataRequired(message="Informe o Processo!")]) # incluir regex para sei... um dia....
     epe         = StringField('EP (sigla):',validators=[DataRequired(message="Informe a instituição!")])
-    fiscal      = SelectField('Fiscal:',choices= lista_pessoal)
+    fiscal      = SelectField('Fiscal:')
     submit      = SubmitField('Atualizar')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        pessoal = db.session.query(User.username)\
+                            .filter(User.ativo == 1)\
+                            .order_by(User.username).all()
+        lista_pessoal = [(p[0],p[0]) for p in pessoal]
+        lista_pessoal.insert(0,('',''))
+        self.fiscal.choices = lista_pessoal
 
 class ChamadaConvForm(FlaskForm):
 
@@ -81,12 +84,14 @@ class NDForm(FlaskForm):
 # form para escolher a coordenação na lista de convênios
 class ListaForm(FlaskForm):
 
-    coords = db.session.query(distinct(Programa_Interesse.coord))\
-                      .order_by(Programa_Interesse.coord).all()
-    lista_coords = [(c[0],c[0]) for c in coords]
-
-    lista_coords.insert(0,('inst','Instituição'))
-    lista_coords.insert(0,('',''))
-
-    coord        = SelectField('Coordenação:',choices= lista_coords)
+    coord        = SelectField('Coordenação:')
     submit       = SubmitField('Filtrar coordenação')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        coords = db.session.query(distinct(Programa_Interesse.coord))\
+                          .order_by(Programa_Interesse.coord).all()
+        lista_coords = [(c[0],c[0]) for c in coords]
+        lista_coords.insert(0,('inst','Instituição'))
+        lista_coords.insert(0,('',''))
+        self.coord.choices = lista_coords

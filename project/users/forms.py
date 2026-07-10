@@ -101,12 +101,7 @@ class TrocaPasswordForm(FlaskForm):
 
 class AdminForm(FlaskForm):
 
-    coords = db.session.query(Coords.sigla)\
-                      .order_by(Coords.sigla).all()
-    lista_coords = [(c[0],c[0]) for c in coords]
-    lista_coords.insert(0,('',''))
-
-    coord        = SelectField('Coordenação:',choices= lista_coords, validators=[DataRequired(message="Escolha uma Coordenção!")])
+    coord        = SelectField('Coordenação:', validators=[DataRequired(message="Escolha uma Coordenção!")])
     despacha0    = BooleanField('É chefe de serviço, ou o seu substituto?')
     despacha     = BooleanField('É coordenador(a), ou substituto(a)?')
     despacha2    = BooleanField('É coordenador(a)-geral, ou substituto(a)?')
@@ -117,6 +112,14 @@ class AdminForm(FlaskForm):
     trab_acordo  = BooleanField('Usuário trabalha com acordos e encomendas?')
     trab_instru  = BooleanField('Usuário trabalha com instrumentos?')
     submit       = SubmitField('Atualizar')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        coords = db.session.query(Coords.sigla)\
+                          .order_by(Coords.sigla).all()
+        lista_coords = [(c[0],c[0]) for c in coords]
+        lista_coords.insert(0,('',''))
+        self.coord.choices = lista_coords
 
 class CoordForm(FlaskForm):
 
@@ -134,15 +137,18 @@ class LogForm(FlaskForm):
 
 class LogFormMan(FlaskForm):
 
-    atividades = db.session.query(Plano_Trabalho.atividade_sigla, Plano_Trabalho.id)\
-                      .order_by(Plano_Trabalho.atividade_sigla).all()
-    lista_atividades = [(str(a[1]),a[0]) for a in atividades]
-    lista_atividades.insert(0,('',''))
-
-    atividade   = SelectField('Atividade:',choices= lista_atividades)
+    atividade   = SelectField('Atividade:')
     entrada_log = TextAreaField('Entrada no Diário: ')
     duracao     = IntegerField('Duração (min.): ')
     submit      = SubmitField('Registrar')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        atividades = db.session.query(Plano_Trabalho.atividade_sigla, Plano_Trabalho.id)\
+                          .order_by(Plano_Trabalho.atividade_sigla).all()
+        lista_atividades = [(str(a[1]),a[0]) for a in atividades]
+        lista_atividades.insert(0,('',''))
+        self.atividade.choices = lista_atividades
 
 class VerForm(FlaskForm):
 
@@ -165,15 +171,18 @@ class RelForm(FlaskForm):
 #
 class AtivUsu  (FlaskForm):
 
-    atividades = db.session.query(Plano_Trabalho.atividade_sigla, Plano_Trabalho.id)\
-                      .order_by(Plano_Trabalho.atividade_sigla).all()
-    lista_atividades = [(str(a[1]),a[0]) for a in atividades]
-    lista_atividades.insert(0,('',''))
-
-    atividade  = SelectField('Atividade:',choices= lista_atividades)
+    atividade  = SelectField('Atividade:')
     nivel_resp = SelectField('Nível de responsabilidade: ',choices=[('',''),('Titular','Titular'),('Suplente','Suplente')],
                             validators=[DataRequired(message="Informe o nível de responsabilidade do usuário!")])
     submit    = SubmitField('Atribuir')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        atividades = db.session.query(Plano_Trabalho.atividade_sigla, Plano_Trabalho.id)\
+                          .order_by(Plano_Trabalho.atividade_sigla).all()
+        lista_atividades = [(str(a[1]),a[0]) for a in atividades]
+        lista_atividades.insert(0,('',''))
+        self.atividade.choices = lista_atividades
 
 class TipoLogForm(FlaskForm):
 

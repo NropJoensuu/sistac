@@ -120,13 +120,16 @@ class EscolheMaeForm(FlaskForm):
 # form para escolher a coordenação na lista de acordos
 class ListaForm(FlaskForm):
 
-    coords = db.session.query(Coords.sigla)\
-                      .order_by(Coords.sigla).all()
-    lista_coords = [(c[0],c[0]) for c in coords]
-    lista_coords.insert(0,('',''))
-
-    coord        = SelectField('Coordenação:',choices= lista_coords)
+    coord        = SelectField('Coordenação:')
     submit       = SubmitField('Filtrar coordenação')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        coords = db.session.query(Coords.sigla)\
+                          .order_by(Coords.sigla).all()
+        lista_coords = [(c[0],c[0]) for c in coords]
+        lista_coords.insert(0,('',''))
+        self.coord.choices = lista_coords
 
 #
 class HomologadoForm(FlaskForm):
