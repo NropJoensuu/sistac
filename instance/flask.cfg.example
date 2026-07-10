@@ -1,0 +1,50 @@
+# flask.cfg.example
+#
+# Copie este arquivo para "flask.cfg" dentro da pasta instance/ e preencha
+# com valores do SEU ambiente de estudo (nunca com credenciais reais de produção).
+#
+# O arquivo "instance/flask.cfg" real NUNCA deve ser commitado no Git.
+# Confirme que "instance/flask.cfg" está no seu .gitignore antes de continuar.
+
+import os
+
+# Gere sua própria chave secreta, por exemplo com:
+#   python3 -c "import secrets; print(secrets.token_hex(24))"
+SECRET_KEY = os.environ.get("SECRET_KEY", "troque-por-uma-chave-gerada-localmente")
+
+# ---------------------------------------------------------------------------
+# Banco de dados
+# ---------------------------------------------------------------------------
+# Para estudo, use um Postgres local (ex: container do próprio Codespace)
+# ou até SQLite, se for só pra rodar e entender o fluxo do Flask.
+db_user     = os.environ.get("DB_USER", "postgres")
+db_pwd      = os.environ.get("DB_PWD", "postgres")
+db_server   = os.environ.get("DB_SERVER", "localhost")
+db_port     = os.environ.get("DB_PORT", "5432")
+db_database = os.environ.get("DB_DATABASE", "sistac_dev")
+
+SQLALCHEMY_DATABASE_URI = "postgresql+psycopg2://{}:{}@{}:{}/{}".format(
+    db_user, db_pwd, db_server, db_port, db_database
+)
+SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+# ---------------------------------------------------------------------------
+# E-mail (opcional para estudo — pode deixar em branco se não for testar envio)
+# ---------------------------------------------------------------------------
+MAIL_SERVER       = os.environ.get("MAIL_SERVER", "")
+MAIL_PORT         = os.environ.get("MAIL_PORT", "587")
+MAIL_USE_TLS      = os.environ.get("MAIL_USE_TLS", "True")
+MAIL_USERNAME     = os.environ.get("MAIL_USER", "")
+MAIL_PASSWORD     = os.environ.get("MAIL_PWD", "")
+MAIL_DEFAULT_SENDER = MAIL_USERNAME
+
+# ---------------------------------------------------------------------------
+# Oracle / DW (opcional — só necessário se for estudar a parte de cargas)
+# ---------------------------------------------------------------------------
+DSN_ORACLE     = os.environ.get("DSN_ORACLE", "")
+USER_ORACLE    = os.environ.get("USER_ORACLE", "")
+PASSWORD_ORACLE = os.environ.get("PASSWORD_ORACLE", "")
+
+# ---------------------------------------------------------------------------
+SCHEDULER_API_ENABLED = True
+DEBUG = True

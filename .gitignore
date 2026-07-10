@@ -2,7 +2,6 @@
 /dist
 /instance/flask local.cfg
 /__pycache__
-/migrations
 /project/__pycache__
 /project/acordos/__pycache__
 /project/bolsas/__pycache__
@@ -16,3 +15,5 @@
 /project/static/convenio.pdf
 /project/static/convenios.csv
 /project/static/acordos.csv
+/instance/flask.cfg
+/venv
