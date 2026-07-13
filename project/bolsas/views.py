@@ -20,20 +20,20 @@
     * Registrar uma bolsa: cria_bolsa
     * Atualizar dados de uma bolsa: update
 
+    Esta camada (views.py) cuida apenas de roteamento: recebe a requisição,
+    delega a regra de negócio para o módulo services.py, e decide o que
+    renderizar ou para onde redirecionar. Nenhuma consulta ao banco ou
+    conversão de dados deve acontecer aqui.
 """
 
 # views.py na pasta bolsas
 
-from flask import render_template,url_for,flash, redirect,request,Blueprint
+from flask import render_template, url_for, flash, redirect, request, Blueprint
 from flask_login import login_required, current_user
-from project import db
-from project.models import Bolsa
 from project.bolsas.forms import BolsaForm
-from project.demandas.views import registra_log_auto
+from project.bolsas import services
 
-import locale
-
-bolsas = Blueprint('bolsas',__name__,
+bolsas = Blueprint('bolsas', __name__,
                             template_folder='templates/bolsas')
 
 ### ATUALIZAR Bolsa
@@ -49,29 +49,30 @@ def update(bolsa_id):
     +---------------------------------------------------------------------------------------+
     """
 
-    bolsa = Bolsa.query.get_or_404(bolsa_id)
+    bolsa = services.buscar_bolsa(bolsa_id)
 
     form = BolsaForm()
 
     if form.validate_on_submit():
 
-        bolsa.mod         = form.mod.data
-        bolsa.niv         = form.niv.data
-        bolsa.mensalidade = float(form.mensalidade.data.replace('.','').replace(',','.'))
-        bolsa.auxilio     = float(form.auxilio.data.replace('.','').replace(',','.'))
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'bol')
+        services.atualizar_bolsa(
+            bolsa_id=bolsa_id,
+            mod=form.mod.data,
+            niv=form.niv.data,
+            mensalidade_str=form.mensalidade.data,
+            auxilio_str=form.auxilio.data,
+            usuario_id=current_user.id,
+        )
 
         flash('Modalidade atualizada!')
         return redirect(url_for('bolsas.lista_bolsas'))
     # traz a informação atual da bolsa
     elif request.method == 'GET':
-        form.mod.data     = bolsa.mod
-        form.niv.data     = bolsa.niv
-        form.mensalidade.data = locale.currency( bolsa.mensalidade, symbol=False, grouping = True )
-        form.auxilio.data     = locale.currency( bolsa.auxilio, symbol=False, grouping = True )
+        dados = services.formata_bolsa_para_edicao(bolsa)
+        form.mod.data = dados['mod']
+        form.niv.data = dados['niv']
+        form.mensalidade.data = dados['mensalidade']
+        form.auxilio.data = dados['auxilio']
 
     return render_template('add_bolsa.html', title='Update',
                            form=form)
@@ -90,15 +91,13 @@ def cria_bolsa():
     form = BolsaForm()
 
     if form.validate_on_submit():
-        bolsa = Bolsa(mod         = form.mod.data,
-                      niv         = form.niv.data,
-                      mensalidade = float(form.mensalidade.data.replace('.','').replace(',','.')),
-                      auxilio     = float(form.auxilio.data.replace('.','').replace(',','.')),
-                      )
-        db.session.add(bolsa)
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'bol')
+        services.criar_bolsa(
+            mod=form.mod.data,
+            niv=form.niv.data,
+            mensalidade_str=form.mensalidade.data,
+            auxilio_str=form.auxilio.data,
+            usuario_id=current_user.id,
+        )
 
         flash('Bolsa registrada!')
         return redirect(url_for('bolsas.lista_bolsas'))
@@ -116,21 +115,7 @@ def lista_bolsas():
     +---------------------------------------------------------------------------------------+
     """
 
+    bolsas_dados, bolsas_formatadas = services.listar_bolsas()
 
-    # traz os dados das bolsas cadastratas
-
-    bolsas = db.session.query(Bolsa.id,Bolsa.mod,Bolsa.niv,Bolsa.mensalidade,Bolsa.auxilio).all()
-
-    quantidade = len(bolsas)
-
-    # reescreve a saida da query 'bolsas' para ajustar formato de dinheiro
-    bolsas_s = []
-    for bolsa in bolsas:
-        bolsa_s = list(bolsa)
-        bolsa_s[3] = locale.currency(bolsa_s[3], symbol=False, grouping = True)
-        bolsa_s[4] = locale.currency(bolsa_s[4], symbol=False, grouping = True)
-
-        bolsas_s.append(bolsa_s)
-
-    return render_template('list_bolsas.html', quantidade = quantidade,
-                            bolsas=bolsas, bolsas_s = bolsas_s)
+    return render_template('list_bolsas.html', quantidade=len(bolsas_dados),
+                            bolsas=bolsas_dados, bolsas_s=bolsas_formatadas)
