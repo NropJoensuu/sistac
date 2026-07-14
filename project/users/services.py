@@ -123,7 +123,7 @@ def registrar_usuario(email, username, password, coord, despacha0, despacha, des
 
     coords = db.session.query(Coords.sigla).all()
     if (coord,) not in coords:
-        nova_coord = Coords(sigla=coord)
+        nova_coord = Coords(sigla=coord, pai='')
         db.session.add(nova_coord)
         db.session.commit()
 
