@@ -50,6 +50,7 @@ from project.models import DadosSEI, Convenio, Demanda, User, Programa_Interesse
                            Desembolso, Pagamento, Chamadas, MSG_Siconv, Proposta, Programa, Coords, Emp_Cap_Cus, Crono_Desemb, Plano_Trabalho
 from project.convenios.forms import SEIForm, ProgPrefForm, ListaForm, NDForm, ChamadaConvForm
 from project.demandas.views import registra_log_auto
+from project.convenios import services
 
 import locale
 import datetime
@@ -101,31 +102,9 @@ def lista_programas_pref():
     |                                                                                       |
     +---------------------------------------------------------------------------------------+
     """
-# Lê tabela programas
-    progs = db.session.query(Programa.COD_PROGRAMA,
-                             Programa.NOME_PROGRAMA,
-                             Programa.SIT_PROGRAMA,
-                             Programa.ANO_DISPONIBILIZACAO,
-                             Programa_Interesse.sigla,
-                             Programa_Interesse.coord)\
-                             .outerjoin(Programa_Interesse, Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
-                             .order_by(Programa.ANO_DISPONIBILIZACAO,Programa.NOME_PROGRAMA).all()
+    progs, cod_inst = services.listar_programas()
 
-    quantidade = len(progs)
-
-    inst = db.session.query(RefSICONV.cod_inst).first()
-
-    # with open('/app/project/static/programas_conv.csv','w',encoding='UTF8',newline='') as f:
-    #     writer = csv.writer(f, delimiter=';')
-    #     writer.writerow(['Programa','Nome','Situação','Ano','Sigla','Coordenação'])
-    #     writer.writerows(progs)
-
-    cria_csv('/app/project/static/programas_conv.csv',['Programa','Nome','Situação','Ano','Sigla','Coordenação'],progs)    
-
-    # o comandinho mágico que permite fazer o download de um arquivo
-    send_from_directory('/app/project/static', 'programas_conv.csv')    
-
-    return render_template('lista_programas_pref.html', progs = progs, quantidade=quantidade, cod_inst = inst.cod_inst)
+    return render_template('lista_programas_pref.html', progs=progs, quantidade=len(progs), cod_inst=cod_inst)
 
 #
 ### ATUALIZAR LISTA DE PROGRAMAS PREFERENCIAIS (PROGRAMAS DA COORDENAÇÃO)
@@ -141,35 +120,19 @@ def prog_pref_update(cod_prog):
     +----------------------------------------------------------------------------------------------+
     """
 
-    programa = Programa.query.filter(Programa.COD_PROGRAMA==str(cod_prog)).first_or_404()
-
-    programa_interesse = Programa_Interesse.query.get(str(cod_prog))
+    programa = services.buscar_programa(cod_prog)
+    programa_interesse = services.buscar_programa_interesse(cod_prog)
 
     form = ProgPrefForm()
 
     if form.validate_on_submit():
 
-        if programa_interesse is None:
+        _, status = services.salvar_programa_interesse(
+            programa.COD_PROGRAMA, form.sigla.data, form.coord.data, current_user.id)
 
-            programa_interesse = Programa_Interesse(cod_programa = programa.COD_PROGRAMA,
-                                                    sigla        = form.sigla.data,
-                                                    coord        = form.coord.data)
-            db.session.add(programa_interesse)
-            db.session.commit()
-
-            registra_log_auto(current_user.id,None,'pre')
-
+        if status == 'inserido':
             flash('Programa preferencial inserido!','sucesso')
-
         else:
-
-            programa_interesse.sigla        = form.sigla.data
-            programa_interesse.coord        = form.coord.data
-
-            db.session.commit()
-
-            registra_log_auto(current_user.id,None,'pre')
-
             flash('Programa preferencial atualizado!','sucesso')
 
         return redirect(url_for('convenios.lista_programas_pref'))
