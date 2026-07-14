@@ -24,9 +24,10 @@ from werkzeug.security import generate_password_hash
 from sqlalchemy import func
 from sqlalchemy.sql import label
 
-from project import db, mail, app
-from project.models import User, Coords, Sistema, Demanda, Providencia, Despacho, Log_Auto, Plano_Trabalho, Ativ_Usu
+from project import db, mail, app, sched
+from project.models import User, Coords, Sistema, Demanda, Providencia, Despacho, Log_Auto, Plano_Trabalho, Ativ_Usu, RefSICONV, Log_Desc
 from project.demandas.views import registra_log_auto
+from project.core.views import cargaSICONV, chamadas_DW
 
 
 # --- envio de e-mail ---
@@ -550,3 +551,195 @@ def plano_trabalho_usuario(user_id):
         'carga_1': carga_1_total,
         'carga_2': carga_2_total,
     }
+
+
+# =============================================================================
+# Administração
+# =============================================================================
+
+def listar_usuarios():
+    """Lista todos os usuários cadastrados, ordenados por ID."""
+    return User.query.order_by(User.id).all()
+
+
+def dados_config_sistema():
+    """Retorna os dados atuais de configuração geral do sistema."""
+    users = listar_usuarios()
+    sistema = Sistema.query.first()
+    inst = RefSICONV.query.first()
+    return users, sistema, inst
+
+
+def atualizar_config_sistema(ver, nome_sistema, descritivo, funcionalidade_conv,
+                              funcionalidade_acordo, funcionalidade_instru,
+                              cod_inst, carga_auto, usuario_id):
+    """
+    Atualiza a versão do sistema para todos os usuários, os dados gerais
+    do Sistema, o código da instituição no SICONV, e agenda/cancela as
+    cargas automáticas (SICONV e DW) conforme o parâmetro carga_auto.
+    """
+    users = listar_usuarios()
+    sistema = Sistema.query.first()
+    inst = RefSICONV.query.first()
+
+    for user in users:
+        user.sversion = ver
+        if not funcionalidade_conv:
+            user.trab_conv = 0
+        if not funcionalidade_acordo:
+            user.trab_acordo = 0
+        if not funcionalidade_instru:
+            user.trab_instru = 0
+
+    db.session.commit()
+
+    sistema.nome_sistema = nome_sistema
+    sistema.descritivo = descritivo
+    sistema.funcionalidade_conv = '1' if funcionalidade_conv else '0'
+    sistema.funcionalidade_acordo = '1' if funcionalidade_acordo else '0'
+    sistema.funcionalidade_instru = '1' if funcionalidade_instru else '0'
+    inst.cod_inst = cod_inst
+
+    id_1 = 'carga_siconv'
+    id_2 = 'carga_chamadas_DW'
+
+    if carga_auto:
+        sistema.carga_auto = '1'
+
+        # VERIFICA E, SE FOR O CASO, AGENDA CARGA SICONV
+        try:
+            job_existente = sched.get_job(id_1)
+            executa = not job_existente
+        except Exception:
+            executa = True
+
+        if executa:
+            dia_semana = 'mon-fri'
+            hora = 8
+            minuto = 13
+            msg = ('*** Agendamento acionado ' + id_1 + ', rodando ' + dia_semana + ', às ' + str(hora) + ':' + str(minuto) + ' ***')
+            print(msg)
+            try:
+                sched.add_job(trigger='cron', id=id_1, func=cargaSICONV, day_of_week=dia_semana, hour=hora, minute=minuto, misfire_grace_time=3600, coalesce=True)
+                sched.start()
+            except Exception:
+                sched.reschedule_job(id_1, trigger='cron', day_of_week=dia_semana, hour=hora, minute=minuto)
+
+            registra_log_auto(usuario_id, None, 'agc')
+
+        # VERIFICA E, SE FOR O CASO, AGENDA CARGA DW
+        try:
+            job_existente = sched.get_job(id_2)
+            executa = not job_existente
+        except Exception:
+            executa = True
+
+        if executa:
+            dia = '2nd tue'
+            hora = 18
+            minuto = 18
+            msg = ('*** Agendamento inicial ' + id_2 + ', rodando ' + dia + ', às ' + str(hora) + ':' + str(minuto) + ' ***')
+            print(msg)
+            try:
+                sched.add_job(trigger='cron', id=id_2, func=chamadas_DW, day=dia, hour=hora, minute=minuto, misfire_grace_time=3600, coalesce=True)
+                sched.start()
+            except Exception:
+                sched.reschedule_job(id_2, trigger='cron', day=dia, hour=hora, minute=minuto)
+
+            registra_log_auto(usuario_id, None, 'agc')
+
+    else:
+        sistema.carga_auto = '0'
+        print('*** Jobs de carga serão CANCELADOS. Não haverá cargas automáticas. ***')
+        try:
+            sched.remove_job(id_1)
+        except Exception:
+            print('*** Não há job ' + id_1 + ' para cancelar. ***')
+        try:
+            sched.remove_job(id_2)
+        except Exception:
+            print('*** Não há job ' + id_2 + ' para cancelar. ***')
+        registra_log_auto(usuario_id, None, 'agx')
+
+    registra_log_auto(usuario_id, None, 'ver')
+
+
+def buscar_usuario(user_id):
+    """Busca um usuário pelo ID, ou levanta 404 se não existir."""
+    return User.query.get_or_404(user_id)
+
+
+def coords_choices():
+    """Retorna a lista de coordenações formatada para um SelectField."""
+    coords = db.session.query(Coords.sigla).order_by(Coords.sigla).all()
+    lista_coords = [(c[0], c[0]) for c in coords]
+    lista_coords.insert(0, ('', ''))
+    return lista_coords
+
+
+def atualizar_usuario_admin(user_id, coord, despacha0, despacha, despacha2, ativo,
+                             role, cargo_func, trab_conv, trab_acordo, trab_instru, usuario_id):
+    """Atualiza os dados administrativos de um usuário (feito pelo admin)."""
+    user = buscar_usuario(user_id)
+    sistema = Sistema.query.first()
+
+    user.coord = coord
+    user.despacha0 = 1 if despacha0 else 0
+    user.despacha = 1 if despacha else 0
+    user.despacha2 = 1 if despacha2 else 0
+    user.ativo = 1 if ativo else 0
+    user.role = role
+    user.cargo_func = cargo_func
+
+    if sistema.funcionalidade_conv == 1:
+        user.trab_conv = int(trab_conv)
+    if sistema.funcionalidade_acordo == 1:
+        user.trab_acordo = int(trab_acordo)
+    if sistema.funcionalidade_instru == 1:
+        user.trab_instru = int(trab_instru)
+
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'adm')
+
+    return user
+
+
+def listar_coords():
+    """Lista todas as coordenações cadastradas."""
+    return db.session.query(Coords).order_by(Coords.sigla).all()
+
+
+def criar_coord(sigla, pai):
+    """Registra uma nova coordenação."""
+    nova_coord = Coords(sigla=sigla, pai=pai)
+    db.session.add(nova_coord)
+    db.session.commit()
+    return nova_coord
+
+
+def buscar_coord(coord_id):
+    """Busca uma coordenação pelo ID, ou levanta 404 se não existir."""
+    return Coords.query.get_or_404(coord_id)
+
+
+def atualizar_coord(coord_id, sigla, pai):
+    """Atualiza os dados de uma coordenação existente."""
+    coord = buscar_coord(coord_id)
+    coord.sigla = sigla
+    coord.pai = pai
+    db.session.commit()
+    return coord
+
+
+def listar_tipos_log():
+    """Lista todos os tipos de log cadastrados."""
+    return db.session.query(Log_Desc).order_by(Log_Desc.tipo_registro).all()
+
+
+def criar_tipo_log(tipo, desc):
+    """Registra um novo tipo de log."""
+    novo_tipo = Log_Desc(tipo_registro=tipo, desc_registro=desc)
+    db.session.add(novo_tipo)
+    db.session.commit()
+    return novo_tipo

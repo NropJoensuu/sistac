@@ -337,120 +337,23 @@ def admin_reg_ver():
     if current_user.role[0:5] != 'admin':
         abort(403)
     else:
-        users   = User.query.order_by(User.id).all()
-        sistema = Sistema.query.first()
-        inst    = RefSICONV.query.first()
+        users, sistema, inst = services.dados_config_sistema()
 
         form = VerForm()
 
         if form.validate_on_submit():
 
-            for user in users:
-
-                user.sversion = form.ver.data
-                if not form.funcionalidade_conv.data:
-                    user.trab_conv = 0
-                if not form.funcionalidade_acordo.data:
-                    user.trab_acordo = 0
-                if not form.funcionalidade_instru.data:
-                    user.trab_instru = 0
-
-            db.session.commit()
-
-            sistema.nome_sistema          = form.nome_sistema.data
-            sistema.descritivo            = form.descritivo.data
-            if form.funcionalidade_conv.data:
-                sistema.funcionalidade_conv   = '1'
-            else:
-                sistema.funcionalidade_conv   = '0'
-            if form.funcionalidade_acordo.data:
-                sistema.funcionalidade_acordo = '1'
-            else:
-                 sistema.funcionalidade_acordo = '1'
-            if form.funcionalidade_instru.data:
-                sistema.funcionalidade_instru = '1'
-            else:
-                sistema.funcionalidade_instru = '0'
-            inst.cod_inst                 = form.cod_inst.data
-
-            
-            id_1 = 'carga_siconv'
-            id_2 = 'carga_chamadas_DW'      
-            
-            if form.carga_auto.data: 
-
-                sistema.carga_auto   = '1'   
-
-                # VERIFICA E, SER FOR O CASO, AGENDA CARGA SICONV
-
-                try:
-                    job_existente = sched.get_job(id_1)
-                    if job_existente:
-                        executa = False
-                    else:
-                        executa = True      
-                except:
-                    executa = True
-
-                if executa:
-
-                    dia_semana = 'mon-fri'
-                    hora       = 8
-                    minuto     = 13
-
-                    msg = ('*** Agendamento acionado '+id_1+', rodando '+dia_semana+', às '+str(hora)+':'+str(minuto)+' ***')
-                    print(msg)
-                    try:
-                        sched.add_job(trigger='cron', id=id_1, func=cargaSICONV, day_of_week=dia_semana, hour=hora, minute=minuto, misfire_grace_time=3600, coalesce=True)
-                        sched.start()
-                    except:
-                        sched.reschedule_job(id_1, trigger='cron', day_of_week=dia_semana, hour=hora, minute=minuto)
-
-                    registra_log_auto(current_user.id,None,'agc')    
-
-                # VERIFICA E, SER FOR O CASO, AGENDA CARGA DW                                                        
-
-                try:
-                    job_existente = sched.get_job(id_2)
-                    if job_existente:
-                        executa = False
-                    else:
-                        executa = True      
-                except:
-                    executa = True
-
-                if executa:
-
-                    dia    ='2nd tue'
-                    hora   = 18
-                    minuto = 18
-
-                    msg = ('*** Agendamento inicial '+id_2+', rodando '+dia+', às '+str(hora)+':'+str(minuto)+' ***')
-                    print(msg)
-                    try:
-                        sched.add_job(trigger='cron', id=id_2, func=chamadas_DW, day=dia, hour=hora, minute=minuto, misfire_grace_time=3600, coalesce=True)
-                        sched.start()
-                    except:
-                        sched.reschedule_job(id_2, trigger='cron', day=dia, hour=hora, minute=minuto)
-
-                    registra_log_auto(current_user.id,None,'agc')         
-
-            else:
-                sistema.carga_auto = '0' 
-                msg =  ('*** Jobs de carga serão CANCELADOS. Não haverá cargas automáticas. ***')
-                print(msg)
-                try:
-                    sched.remove_job(id_1) 
-                except:
-                    print('*** Não há job '+id_1+' para cancelar. ***')  
-                try:      
-                    sched.remove_job(id_2)
-                except:
-                    print('*** Não há job '+id_2+' para cancelar. ***')
-                registra_log_auto(current_user.id,None,'agx')    
-
-
-            registra_log_auto(current_user.id,None,'ver')
+            services.atualizar_config_sistema(
+                ver=form.ver.data,
+                nome_sistema=form.nome_sistema.data,
+                descritivo=form.descritivo.data,
+                funcionalidade_conv=form.funcionalidade_conv.data,
+                funcionalidade_acordo=form.funcionalidade_acordo.data,
+                funcionalidade_instru=form.funcionalidade_instru.data,
+                cod_inst=form.cod_inst.data,
+                carga_auto=form.carga_auto.data,
+                usuario_id=current_user.id,
+            )
 
             flash('Dados gerais do sistema atualizados!','sucesso')
 
@@ -485,7 +388,7 @@ def admin_view_users():
     if current_user.role[0:5] != 'admin':
         abort(403)
     else:
-        users = User.query.order_by(User.id).all()
+        users = services.listar_usuarios()
         return render_template('admin_view_users.html', users=users)
 
 #
@@ -507,53 +410,28 @@ def admin_update_user(user_id):
 
     else:
 
-        user = User.query.get_or_404(user_id)
-        sistema = Sistema.query.first()
-
-        coords = db.session.query(Coords.sigla)\
-                          .order_by(Coords.sigla).all()
-        lista_coords = [(c[0],c[0]) for c in coords]
-        lista_coords.insert(0,('',''))
+        user = services.buscar_usuario(user_id)
 
         form = AdminForm()
 
-        form.coord.choices = lista_coords
+        form.coord.choices = services.coords_choices()
 
         if form.validate_on_submit():
 
-            user.coord = form.coord.data
-
-            if form.despacha0.data:
-                user.despacha0 = 1
-            else: 
-                user.despacha0 = 0
-            if form.despacha.data:
-                user.despacha = 1
-            else: 
-                user.despacha = 0
-            if form.despacha2.data:
-                user.despacha2 = 1
-            else: 
-                user.despacha2 = 0      
-
-            if form.ativo.data:
-                user.ativo = 1
-            else: 
-                user.ativo = 0      
-
-            user.role        = form.role.data
-            user.cargo_func  = form.cargo_func.data
-
-            if sistema.funcionalidade_conv == 1:
-                user.trab_conv   = int(form.trab_conv.data)
-            if sistema.funcionalidade_acordo == 1:
-                user.trab_acordo = int(form.trab_acordo.data)
-            if sistema.funcionalidade_instru == 1:
-                user.trab_instru = int(form.trab_instru.data)
-
-            db.session.commit()
-
-            registra_log_auto(current_user.id,None,'adm')
+            services.atualizar_usuario_admin(
+                user_id=user_id,
+                coord=form.coord.data,
+                despacha0=form.despacha0.data,
+                despacha=form.despacha.data,
+                despacha2=form.despacha2.data,
+                ativo=form.ativo.data,
+                role=form.role.data,
+                cargo_func=form.cargo_func.data,
+                trab_conv=form.trab_conv.data,
+                trab_acordo=form.trab_acordo.data,
+                trab_instru=form.trab_instru.data,
+                usuario_id=current_user.id,
+            )
 
             flash('Usuário atualizado!','sucesso')
 
@@ -592,7 +470,7 @@ def admin_view_coords():
     if current_user.role[0:5] != 'admin':
         abort(403)
     else:
-        coords = db.session.query(Coords).order_by(Coords.sigla).all()
+        coords = services.listar_coords()
         return render_template('admin_view_coords.html', coords=coords)
 
 ## inserção de nova unidade pelo admin
@@ -617,12 +495,7 @@ def admin_insere_coord():
 
         if form.validate_on_submit():
 
-            print ('**** ','inserino nova coord')
-
-            nova_coord = Coords(sigla = form.coord.data,
-                                pai   = form.pai.data)
-            db.session.add(nova_coord)
-            db.session.commit()
+            services.criar_coord(form.coord.data, form.pai.data)
 
             flash('Unidade '+form.coord.data+' inserida no sistema!','sucesso')
 
@@ -649,15 +522,13 @@ def admin_update_coord(id):
 
     else:
 
-        coord = Coords.query.get_or_404(id)
+        coord = services.buscar_coord(id)
 
         form = CoordForm()
 
         if form.validate_on_submit():
 
-            coord.sigla = form.coord.data
-            coord.pai   = form.pai.data
-            db.session.commit()
+            services.atualizar_coord(id, form.coord.data, form.pai.data)
 
             flash('Unidade '+form.coord.data+' alterada!','sucesso')
 
@@ -669,6 +540,7 @@ def admin_update_coord(id):
             form.pai.data    = coord.pai 
 
         return render_template('admin_update_coord.html', form=form)
+
 
 
 #
@@ -1119,7 +991,7 @@ def admin_tipos_log():
     if current_user.role[0:5] != 'admin':
         abort(403)
 
-    tipos_log = db.session.query(Log_Desc).order_by(Log_Desc.tipo_registro).all()
+    tipos_log = services.listar_tipos_log()
 
     return render_template('admin_tipos_log.html', tipos_log=tipos_log)
 
@@ -1143,14 +1015,10 @@ def admin_insere_tipo_log():
 
     if form.validate_on_submit():
 
-        novo_tipo = Log_Desc(tipo_registro = form.tipo.data,
-                             desc_registro = form.desc.data)
-        db.session.add(novo_tipo)
-        db.session.commit()
+        services.criar_tipo_log(form.tipo.data, form.desc.data)
 
         flash('Tipo '+form.tipo.data+' inserido no sistema!','sucesso')
 
         return redirect(url_for('users.admin_tipos_log'))
 
     return render_template('admin_insere_tipo_log.html', form=form)
-
