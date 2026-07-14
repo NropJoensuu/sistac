@@ -47,27 +47,14 @@
 """
 # views.py na pasta users
 
-from itsdangerous import URLSafeTimedSerializer
 from flask import render_template, url_for, flash, redirect, request, Blueprint, abort
 from flask_login import login_user, current_user, logout_user, login_required
-from flask_mail import Message
 from wtforms import ValidationError
-from threading import Thread
-from datetime import datetime, date, timedelta, time
-from calendar import monthrange
-from werkzeug.security import generate_password_hash
-from sqlalchemy import func
-from sqlalchemy.sql import label
-from sqlalchemy.orm import aliased
-from collections import Counter
+from datetime import date
 
-from project import db, mail, app, sched
-from project.models import User, Demanda, Despacho, Providencia, Coords, Log_Auto,\
-                           Log_Desc, Plano_Trabalho, Sistema, RefSICONV, Ativ_Usu, Msgs_Recebidas
 from project.users.forms import RegistrationForm, LoginForm, UpdateUserForm, EmailForm, PasswordForm, AdminForm,\
                                 LogForm, LogFormMan, VerForm, RelForm, AtivUsu, TrocaPasswordForm, CoordForm, TipoLogForm
-from project.core.views import cargaSICONV, chamadas_DW
-from project.demandas.views import registra_log_auto
+from project.users import services
 from project.users import services
 
 users = Blueprint('users',__name__)
@@ -555,148 +542,23 @@ def user_log (usu):
        +--------------------------------------------------------------------------------------+
     """
 
-    def is_integer(n):
-        try:
-            float(n)
-        except ValueError:
-            return False
-        else:
-            return float(n).is_integer()
-
-    if usu == 'todos':
-        user_id = '%'
-    elif is_integer(usu) is True:
-        user_id = usu
-    else:
-        user_id = current_user.id
+    user_id = services.resolver_usuario_alvo_log(usu, current_user.id)
 
     form = LogForm()
     form2 = LogFormMan()
 
     if form.validate_on_submit():
 
-        data_ini = form.data_ini.data
-        data_fim = form.data_fim.data
-        log_part = form.log_part.data
-
-        if user_id == '%':
-            log = db.session.query(Log_Auto.id,
-                                Log_Auto.data_hora,
-                                Log_Auto.demanda_id,
-                                Log_Auto.tipo_registro,
-                                Log_Auto.atividade,
-                                Log_Desc.desc_registro,
-                                User.username,
-                                Demanda.programa,
-                                label('ativ_sigla',Plano_Trabalho.atividade_sigla),
-                                Log_Auto.duracao)\
-                            .outerjoin(Log_Desc, Log_Auto.tipo_registro == Log_Desc.tipo_registro)\
-                            .join(User, Log_Auto.user_id == User.id)\
-                            .outerjoin(Demanda, Demanda.id == Log_Auto.demanda_id)\
-                            .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Log_Auto.atividade)\
-                            .filter(Log_Auto.data_hora >= datetime.combine(data_ini,time.min),
-                                    Log_Auto.data_hora <= datetime.combine(data_fim,time.max),
-                                    Log_Auto.tipo_registro.like('%'+log_part+'%'))\
-                            .order_by(Log_Auto.id.desc())\
-                            .subquery()
-
-        else:
-            log = db.session.query(Log_Auto.id,
-                                Log_Auto.data_hora,
-                                Log_Auto.demanda_id,
-                                Log_Auto.tipo_registro,
-                                Log_Auto.atividade,
-                                Log_Desc.desc_registro,
-                                User.username,
-                                Demanda.programa,
-                                label('ativ_sigla',Plano_Trabalho.atividade_sigla),
-                                Log_Auto.duracao)\
-                            .outerjoin(Log_Desc, Log_Auto.tipo_registro == Log_Desc.tipo_registro)\
-                            .join(User, Log_Auto.user_id == User.id)\
-                            .outerjoin(Demanda, Demanda.id == Log_Auto.demanda_id)\
-                            .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Log_Auto.atividade)\
-                            .filter(Log_Auto.user_id == user_id,
-                                    Log_Auto.data_hora >= datetime.combine(data_ini,time.min),
-                                    Log_Auto.data_hora <= datetime.combine(data_fim,time.max),
-                                    Log_Auto.tipo_registro.like('%'+log_part+'%'))\
-                            .order_by(Log_Auto.id.desc())\
-                            .subquery()
-
-
-        atividades = db.session.query(log,
-                                      Plano_Trabalho.atividade_sigla)\
-                               .outerjoin(Plano_Trabalho, Plano_Trabalho.id == log.c.programa)\
-                               .order_by(log.c.id.desc())\
-                               .all()
-
-        # cria lista com ocorrências de tipo de registro
-
-        l_log = [entrada.desc_registro for entrada in atividades]
-
-        # conta entradas no log por tipo de registro, gerando um dicionário classificado
-
-        agregado = {k: v for k, v in sorted(Counter(l_log).items(), key=lambda item: item[1])}
+        log, atividades, agregado = services.log_filtrado(
+            user_id, form.data_ini.data, form.data_fim.data, form.log_part.data)
 
         return render_template('user_log.html', log=log, atividades = atividades, name=current_user.username,
                                form=form, usu=usu, agregado=agregado)
 
-
     # traz a log das últimas 24 horas e registra entrada manual de log, se for o caso.
     else:
 
-        if user_id == '%':
-            log = db.session.query(Log_Auto.id,
-                                Log_Auto.data_hora,
-                                Log_Auto.demanda_id,
-                                Log_Auto.tipo_registro,
-                                Log_Auto.atividade,
-                                Log_Desc.desc_registro,
-                                User.username,
-                                Demanda.programa,
-                                label('ativ_sigla',Plano_Trabalho.atividade_sigla),
-                                Log_Auto.duracao)\
-                            .outerjoin(Log_Desc, Log_Auto.tipo_registro == Log_Desc.tipo_registro)\
-                            .join(User, Log_Auto.user_id == User.id)\
-                            .outerjoin(Demanda, Demanda.id == Log_Auto.demanda_id)\
-                            .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Log_Auto.atividade)\
-                            .filter(Log_Auto.data_hora >= (datetime.now()-timedelta(days=1)))\
-                            .order_by(Log_Auto.id.desc())\
-                            .subquery()
-        else:
-            log = db.session.query(Log_Auto.id,
-                                Log_Auto.data_hora,
-                                Log_Auto.demanda_id,
-                                Log_Auto.tipo_registro,
-                                Log_Auto.atividade,
-                                Log_Desc.desc_registro,
-                                User.username,
-                                Demanda.programa,
-                                label('ativ_sigla',Plano_Trabalho.atividade_sigla),
-                                Log_Auto.duracao)\
-                            .outerjoin(Log_Desc, Log_Auto.tipo_registro == Log_Desc.tipo_registro)\
-                            .join(User, Log_Auto.user_id == User.id)\
-                            .outerjoin(Demanda, Demanda.id == Log_Auto.demanda_id)\
-                            .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Log_Auto.atividade)\
-                            .filter(Log_Auto.user_id == user_id,
-                                    Log_Auto.data_hora >= (datetime.now()-timedelta(days=1)))\
-                            .order_by(Log_Auto.id.desc())\
-                            .subquery()
-
-
-        atividades = db.session.query(log,
-                                      Plano_Trabalho.atividade_sigla)\
-                               .outerjoin(Plano_Trabalho, Plano_Trabalho.id == log.c.programa)\
-                               .order_by(log.c.id.desc())\
-                               .all()
-
-        # cria lista com ocorrências de tipo de registro
-
-        l_log = [entrada.desc_registro for entrada in atividades]
-
-        # conta entradas no log por tipo de registro, gerando um dicionário classificado
-
-        agregado = {k: v for k, v in sorted(Counter(l_log).items(), key=lambda item: item[1])}
-
+        log, atividades, agregado = services.log_ultimas_24h(user_id)
 
         return render_template('user_log.html', log=log, atividades=atividades, name=current_user.username,
                            form=form, form2=form2, usu=usu, agregado=agregado)
@@ -717,19 +579,10 @@ def user_obs():
 
     if form.validate_on_submit():
 
-        if form.entrada_log.data != '':
+        services.registrar_observacao_log(
+            current_user.id, form.atividade.data, form.entrada_log.data, form.duracao.data)
 
-            # registra_log_auto(current_user.id,None,'man: '+form.entrada_log.data)
-            reg_log = Log_Auto(data_hora     = datetime.now(),
-                               user_id       = current_user.id,
-                               demanda_id    = None,
-                               tipo_registro = 'man: '+form.entrada_log.data,
-                               atividade     = form.atividade.data,
-                               duracao       = form.duracao.data)
-            db.session.add(reg_log)
-            db.session.commit()
-
-            form.entrada_log.data = ''
+        form.entrada_log.data = ''
 
         return redirect(url_for('users.user_log',usu='*'))
 
@@ -747,13 +600,7 @@ def user_msgs_recebidas():
        +--------------------------------------------------------------------------------------+
     """
 
-    hoje = date.today()
-
-    deleta_msgs = db.session.query(Msgs_Recebidas).filter(Msgs_Recebidas.data_hora < (hoje - timedelta(days=30))).delete()
-    db.session.commit()
-
-    msgs = db.session.query(Msgs_Recebidas).filter(Msgs_Recebidas.user_id == current_user.id).order_by(Msgs_Recebidas.data_hora.desc()).all()
-
+    msgs = services.mensagens_recebidas(current_user.id)
 
     return render_template('user_msgs_recebidas.html', msgs = msgs)
 
@@ -774,88 +621,9 @@ def user_rel():
 
     if form.validate_on_submit():
 
-        # levanta dados do plano de Trabalho
+        dados = services.gerar_relatorio_atividades(current_user, form.data_ini.data, form.data_fim.data)
 
-        atividades_1 = db.session.query(Plano_Trabalho.id,
-                                        Plano_Trabalho.atividade_sigla,
-                                        Plano_Trabalho.atividade_desc,
-                                        Plano_Trabalho.natureza,
-                                        Plano_Trabalho.meta)\
-                                        .join(Ativ_Usu, Plano_Trabalho.id == Ativ_Usu.atividade_id)\
-                                        .filter(Ativ_Usu.user_id == current_user.id, Ativ_Usu.nivel == 'Titular')\
-                                        .order_by(Plano_Trabalho.natureza,Plano_Trabalho.atividade_sigla).all()
-
-        quantidade_1 = len(atividades_1)
-
-        carga_1 = db.session.query(label('total',func.sum(Plano_Trabalho.meta)))\
-                            .join(Ativ_Usu, Plano_Trabalho.id == Ativ_Usu.atividade_id)\
-                            .filter(Ativ_Usu.user_id == current_user.id, Ativ_Usu.nivel == 'Titular').all()
-
-        atividades_2 = db.session.query(Plano_Trabalho.id,
-                                        Plano_Trabalho.atividade_sigla,
-                                        Plano_Trabalho.atividade_desc,
-                                        Plano_Trabalho.natureza,
-                                        Plano_Trabalho.meta)\
-                                        .join(Ativ_Usu, Plano_Trabalho.id == Ativ_Usu.atividade_id)\
-                                        .filter(Ativ_Usu.user_id == current_user.id, Ativ_Usu.nivel == 'Suplente')\
-                                        .order_by(Plano_Trabalho.natureza,Plano_Trabalho.atividade_sigla).all()
-
-        quantidade_2 = len(atividades_2)
-
-        carga_2 = db.session.query(label('total',func.sum(Plano_Trabalho.meta)))\
-                            .join(Ativ_Usu, Plano_Trabalho.id == Ativ_Usu.atividade_id)\
-                            .filter(Ativ_Usu.user_id == current_user.id, Ativ_Usu.nivel == 'Suplente').all()
-
-
-        # levanta dados de ações executadas
-
-        coordenador = db.session.query(User.username,
-                                       User.cargo_func,
-                                       User.email)\
-                                .filter(User.cargo_func == 'Coordenador(a)', User.ativo == 1, User.coord == current_user.coord).first()
-
-        coordenador_geral = db.session.query(User.username,
-                                             User.cargo_func,
-                                             User.email)\
-                                       .filter(User.cargo_func == 'Coordenador(a)-Geral').first()
-
-        data_ini = form.data_ini.data
-        data_fim = form.data_fim.data
-
-        log = db.session.query(Log_Auto.id,
-                               Log_Auto.data_hora,
-                               Log_Auto.demanda_id,
-                               Log_Auto.tipo_registro,
-                               Log_Auto.atividade,
-                               Log_Desc.desc_registro,
-                               User.username,
-                               Demanda.programa,
-                               Demanda.sei,
-                               Demanda.conclu,
-                               label('ativ_sigla',Plano_Trabalho.atividade_sigla),
-                               Log_Auto.duracao)\
-                        .outerjoin(Log_Desc, Log_Desc.tipo_registro == Log_Auto.tipo_registro)\
-                        .join(User, User.id == Log_Auto.user_id)\
-                        .outerjoin(Demanda, Demanda.id == Log_Auto.demanda_id)\
-                        .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Log_Auto.atividade)\
-                        .filter(Log_Auto.user_id == current_user.id,
-                                Log_Auto.data_hora >= datetime.combine(data_ini,time.min),
-                                Log_Auto.data_hora <= datetime.combine(data_fim,time.max))\
-                        .subquery()
-
-        atividades = db.session.query(log,
-                                      Plano_Trabalho.atividade_sigla)\
-                               .outerjoin(Plano_Trabalho, Plano_Trabalho.id == log.c.programa)\
-                               .all()
-
-        registra_log_auto(current_user.id,None,'rel')
-
-        return render_template('form_atividades.html', log=log, atividades = atividades,
-                                atividades_1=atividades_1, atividades_2=atividades_2,
-                                quantidade_1=quantidade_1, quantidade_2=quantidade_2,
-                                carga_1=carga_1[0][0], carga_2=carga_2[0][0],
-                                data_ini=data_ini.strftime('%x'), data_fim=data_fim.strftime('%x'),
-                                coordenador=coordenador, coordenador_geral=coordenador_geral)
+        return render_template('form_atividades.html', **dados)
 
     return render_template('user_inf_datas.html', form=form)
 
@@ -873,7 +641,7 @@ def coord_view_users():
     """
     if current_user.despacha == 1 or current_user.despacha0 == 1 or current_user.role[0:5] == "admin":
 
-        users = User.query.order_by(User.id).filter(User.coord == current_user.coord, User.ativo == 1).all()
+        users = services.listar_usuarios_coordenacao(current_user.coord)
         return render_template('coord_view_users.html', users=users)
 
     else:
@@ -898,50 +666,27 @@ def ativ_usu(user_id):
     """
     if current_user.despacha == 1 or current_user.despacha0 == 1 or current_user.role[0:5] == "admin":
 
-        user = User.query.get_or_404(user_id)
+        user = services.buscar_usuario(user_id)
 
-        ativ_usu = db.session.query(Ativ_Usu.atividade_id, Ativ_Usu.nivel, Ativ_Usu.id)\
-                             .filter(Ativ_Usu.user_id == user.id)\
-                             .order_by(Ativ_Usu.nivel.desc()).all()
-
-        l_ativ_usu = [a[0] for a in ativ_usu]
-
-        atividades = db.session.query(Plano_Trabalho.atividade_sigla, Plano_Trabalho.id)\
-                          .order_by(Plano_Trabalho.atividade_sigla).all()
-        lista_atividades = [(str(a[1]),a[0]) for a in atividades]
-        lista_atividades.insert(0,('',''))
+        l_ativ_usu = [a[0] for a in services.atividades_atuais_usuario(user.id)]
 
         form = AtivUsu()
-
-        form.atividade.choices = lista_atividades
+        form.atividade.choices = services.atividades_choices()
 
         if form.validate_on_submit():
 
-            if int(form.atividade.data) in l_ativ_usu:
+            status = services.atribuir_atividade(user.id, form.atividade.data, form.nivel_resp.data, current_user.id)
+
+            if status == 'ja_possui':
                 flash('Usuário já tem esta atividade!','erro')
             else:
-                ativ_para_user = Ativ_Usu(atividade_id = form.atividade.data,
-                                          user_id      = user.id,
-                                          nivel        = form.nivel_resp.data)
-                db.session.add(ativ_para_user)
-
-                db.session.commit()
-
-                registra_log_auto(current_user.id,None,'aus')
-
                 flash('Atividade atribuída ao usuário com sucesso!','sucesso')
-
 
             return redirect(url_for('users.ativ_usu', user_id=user.id))
 
         # traz as atividades atuais do usuário
         elif request.method == 'GET':
-
-            l_ativ_usu = []
-            for ativ in ativ_usu:
-                atividade_usu = db.session.query(Plano_Trabalho.atividade_sigla)\
-                                  .filter(Plano_Trabalho.id == ativ.atividade_id).first()
-                l_ativ_usu.append([atividade_usu.atividade_sigla, ativ.nivel, ativ.id])
+            l_ativ_usu = services.atividades_atuais_formatadas(user.id)
 
         return render_template('coord_update_user.html', user_id=user.id, name=user.username, atividades_usu=l_ativ_usu, form=form)
 
@@ -963,12 +708,7 @@ def delete_atividade_usu(id,user_id):
     if current_user.ativo == 0 or (current_user.despacha0 == 0 and current_user.despacha == 0 and current_user.despacha2 == 0):
         abort(403)
 
-    atividade = Ativ_Usu.query.get_or_404(id)
-
-    db.session.delete(atividade)
-    db.session.commit()
-
-    registra_log_auto(current_user.id,None,'xus')
+    services.excluir_atividade_usuario(id, current_user.id)
 
     flash ('Atividade excluída da lista do usuário!','sucesso')
 

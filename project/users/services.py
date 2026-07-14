@@ -14,8 +14,9 @@
 """
 
 from threading import Thread
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time
 from calendar import monthrange
+from collections import Counter
 
 from itsdangerous import URLSafeTimedSerializer
 from flask import url_for, render_template
@@ -25,7 +26,7 @@ from sqlalchemy import func
 from sqlalchemy.sql import label
 
 from project import db, mail, app, sched
-from project.models import User, Coords, Sistema, Demanda, Providencia, Despacho, Log_Auto, Plano_Trabalho, Ativ_Usu, RefSICONV, Log_Desc
+from project.models import User, Coords, Sistema, Demanda, Providencia, Despacho, Log_Auto, Plano_Trabalho, Ativ_Usu, RefSICONV, Log_Desc, Msgs_Recebidas
 from project.demandas.views import registra_log_auto
 from project.core.views import cargaSICONV, chamadas_DW
 
@@ -743,3 +744,269 @@ def criar_tipo_log(tipo, desc):
     db.session.add(novo_tipo)
     db.session.commit()
     return novo_tipo
+
+
+# =============================================================================
+# Atividade / log
+# =============================================================================
+
+def _is_integer(n):
+    """Verifica se uma string representa um número inteiro."""
+    try:
+        float(n)
+    except ValueError:
+        return False
+    else:
+        return float(n).is_integer()
+
+
+def resolver_usuario_alvo_log(usu, usuario_atual_id):
+    """
+    Resolve o filtro de usuário para a consulta de log: 'todos' vira '%'
+    (sem filtro), um ID numérico é usado diretamente, e qualquer outro
+    valor (ex: '*') aponta para o próprio usuário logado.
+    """
+    if usu == 'todos':
+        return '%'
+    elif _is_integer(usu):
+        return usu
+    return usuario_atual_id
+
+
+def _query_log(user_id, data_ini, data_fim):
+    """Monta a subquery de log filtrada por usuário e intervalo de datas."""
+    filtros = [
+        Log_Auto.data_hora >= datetime.combine(data_ini, time.min),
+        Log_Auto.data_hora <= datetime.combine(data_fim, time.max),
+    ]
+    if user_id != '%':
+        filtros.insert(0, Log_Auto.user_id == user_id)
+
+    return db.session.query(
+        Log_Auto.id, Log_Auto.data_hora, Log_Auto.demanda_id, Log_Auto.tipo_registro,
+        Log_Auto.atividade, Log_Desc.desc_registro, User.username, Demanda.programa,
+        label('ativ_sigla', Plano_Trabalho.atividade_sigla), Log_Auto.duracao
+    ).outerjoin(Log_Desc, Log_Auto.tipo_registro == Log_Desc.tipo_registro)\
+     .join(User, Log_Auto.user_id == User.id)\
+     .outerjoin(Demanda, Demanda.id == Log_Auto.demanda_id)\
+     .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Log_Auto.atividade)\
+     .filter(*filtros)\
+     .order_by(Log_Auto.id.desc())\
+     .subquery()
+
+
+def _query_log_24h(user_id):
+    """Monta a subquery de log das últimas 24 horas, filtrada por usuário."""
+    filtros = [Log_Auto.data_hora >= (datetime.now() - timedelta(days=1))]
+    if user_id != '%':
+        filtros.insert(0, Log_Auto.user_id == user_id)
+
+    return db.session.query(
+        Log_Auto.id, Log_Auto.data_hora, Log_Auto.demanda_id, Log_Auto.tipo_registro,
+        Log_Auto.atividade, Log_Desc.desc_registro, User.username, Demanda.programa,
+        label('ativ_sigla', Plano_Trabalho.atividade_sigla), Log_Auto.duracao
+    ).outerjoin(Log_Desc, Log_Auto.tipo_registro == Log_Desc.tipo_registro)\
+     .join(User, Log_Auto.user_id == User.id)\
+     .outerjoin(Demanda, Demanda.id == Log_Auto.demanda_id)\
+     .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Log_Auto.atividade)\
+     .filter(*filtros)\
+     .order_by(Log_Auto.id.desc())\
+     .subquery()
+
+
+def _atividades_e_agregado(log_subquery):
+    """A partir de uma subquery de log, monta a lista de atividades e o agregado por tipo."""
+    atividades = db.session.query(log_subquery, Plano_Trabalho.atividade_sigla)\
+                           .outerjoin(Plano_Trabalho, Plano_Trabalho.id == log_subquery.c.programa)\
+                           .order_by(log_subquery.c.id.desc())\
+                           .all()
+
+    l_log = [entrada.desc_registro for entrada in atividades]
+    agregado = {k: v for k, v in sorted(Counter(l_log).items(), key=lambda item: item[1])}
+
+    return atividades, agregado
+
+
+def log_filtrado(user_id, data_ini, data_fim, log_part):
+    """
+    Retorna o log filtrado por período e tipo de registro (log_part é
+    usado num LIKE sobre o tipo_registro).
+    """
+    log = _query_log(user_id, data_ini, data_fim)
+    atividades, agregado = _atividades_e_agregado(log)
+    return log, atividades, agregado
+
+
+def log_ultimas_24h(user_id):
+    """Retorna o log das últimas 24 horas."""
+    log = _query_log_24h(user_id)
+    atividades, agregado = _atividades_e_agregado(log)
+    return log, atividades, agregado
+
+
+def registrar_observacao_log(usuario_id, atividade_id, entrada_log, duracao):
+    """Registra uma entrada manual de log ('observação') para o usuário."""
+    if entrada_log == '':
+        return
+
+    reg_log = Log_Auto(
+        data_hora=datetime.now(), user_id=usuario_id, demanda_id=None,
+        tipo_registro='man: ' + entrada_log, atividade=atividade_id, duracao=duracao,
+    )
+    db.session.add(reg_log)
+    db.session.commit()
+
+
+def mensagens_recebidas(usuario_id):
+    """
+    Remove mensagens com mais de 30 dias e retorna as mensagens
+    recebidas pelo usuário, mais recentes primeiro.
+    """
+    hoje = date.today()
+
+    db.session.query(Msgs_Recebidas)\
+             .filter(Msgs_Recebidas.data_hora < (hoje - timedelta(days=30)))\
+             .delete()
+    db.session.commit()
+
+    return db.session.query(Msgs_Recebidas)\
+                     .filter(Msgs_Recebidas.user_id == usuario_id)\
+                     .order_by(Msgs_Recebidas.data_hora.desc()).all()
+
+
+def gerar_relatorio_atividades(usuario, data_ini, data_fim):
+    """
+    Monta os dados do relatório de atividades de um usuário no período
+    informado: plano de trabalho (Titular/Suplente) e log de ações
+    executadas.
+    """
+    atividades_1 = db.session.query(Plano_Trabalho.id, Plano_Trabalho.atividade_sigla,
+                                    Plano_Trabalho.atividade_desc, Plano_Trabalho.natureza,
+                                    Plano_Trabalho.meta)\
+                                    .join(Ativ_Usu, Plano_Trabalho.id == Ativ_Usu.atividade_id)\
+                                    .filter(Ativ_Usu.user_id == usuario.id, Ativ_Usu.nivel == 'Titular')\
+                                    .order_by(Plano_Trabalho.natureza, Plano_Trabalho.atividade_sigla).all()
+
+    quantidade_1 = len(atividades_1)
+
+    carga_1 = db.session.query(label('total', func.sum(Plano_Trabalho.meta)))\
+                        .join(Ativ_Usu, Plano_Trabalho.id == Ativ_Usu.atividade_id)\
+                        .filter(Ativ_Usu.user_id == usuario.id, Ativ_Usu.nivel == 'Titular').all()
+
+    atividades_2 = db.session.query(Plano_Trabalho.id, Plano_Trabalho.atividade_sigla,
+                                    Plano_Trabalho.atividade_desc, Plano_Trabalho.natureza,
+                                    Plano_Trabalho.meta)\
+                                    .join(Ativ_Usu, Plano_Trabalho.id == Ativ_Usu.atividade_id)\
+                                    .filter(Ativ_Usu.user_id == usuario.id, Ativ_Usu.nivel == 'Suplente')\
+                                    .order_by(Plano_Trabalho.natureza, Plano_Trabalho.atividade_sigla).all()
+
+    quantidade_2 = len(atividades_2)
+
+    carga_2 = db.session.query(label('total', func.sum(Plano_Trabalho.meta)))\
+                        .join(Ativ_Usu, Plano_Trabalho.id == Ativ_Usu.atividade_id)\
+                        .filter(Ativ_Usu.user_id == usuario.id, Ativ_Usu.nivel == 'Suplente').all()
+
+    coordenador = db.session.query(User.username, User.cargo_func, User.email)\
+                            .filter(User.cargo_func == 'Coordenador(a)', User.ativo == 1,
+                                    User.coord == usuario.coord).first()
+
+    coordenador_geral = db.session.query(User.username, User.cargo_func, User.email)\
+                                   .filter(User.cargo_func == 'Coordenador(a)-Geral').first()
+
+    log = db.session.query(
+        Log_Auto.id, Log_Auto.data_hora, Log_Auto.demanda_id, Log_Auto.tipo_registro,
+        Log_Auto.atividade, Log_Desc.desc_registro, User.username, Demanda.programa,
+        Demanda.sei, Demanda.conclu, label('ativ_sigla', Plano_Trabalho.atividade_sigla),
+        Log_Auto.duracao
+    ).outerjoin(Log_Desc, Log_Desc.tipo_registro == Log_Auto.tipo_registro)\
+     .join(User, User.id == Log_Auto.user_id)\
+     .outerjoin(Demanda, Demanda.id == Log_Auto.demanda_id)\
+     .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Log_Auto.atividade)\
+     .filter(Log_Auto.user_id == usuario.id,
+             Log_Auto.data_hora >= datetime.combine(data_ini, time.min),
+             Log_Auto.data_hora <= datetime.combine(data_fim, time.max))\
+     .subquery()
+
+    atividades = db.session.query(log, Plano_Trabalho.atividade_sigla)\
+                           .outerjoin(Plano_Trabalho, Plano_Trabalho.id == log.c.programa)\
+                           .all()
+
+    registra_log_auto(usuario.id, None, 'rel')
+
+    return {
+        'log': log,
+        'atividades': atividades,
+        'atividades_1': atividades_1,
+        'atividades_2': atividades_2,
+        'quantidade_1': quantidade_1,
+        'quantidade_2': quantidade_2,
+        'carga_1': carga_1[0][0],
+        'carga_2': carga_2[0][0],
+        'data_ini': data_ini.strftime('%x'),
+        'data_fim': data_fim.strftime('%x'),
+        'coordenador': coordenador,
+        'coordenador_geral': coordenador_geral,
+    }
+
+
+def listar_usuarios_coordenacao(coord):
+    """Lista os usuários ativos de uma coordenação, para atribuição de atividades."""
+    return User.query.order_by(User.id).filter(User.coord == coord, User.ativo == 1).all()
+
+
+def atividades_atuais_usuario(user_id):
+    """Retorna as atividades atualmente atribuídas a um usuário."""
+    return db.session.query(Ativ_Usu.atividade_id, Ativ_Usu.nivel, Ativ_Usu.id)\
+                     .filter(Ativ_Usu.user_id == user_id)\
+                     .order_by(Ativ_Usu.nivel.desc()).all()
+
+
+def atividades_choices():
+    """Retorna a lista de atividades do plano de trabalho formatada para um SelectField."""
+    atividades = db.session.query(Plano_Trabalho.atividade_sigla, Plano_Trabalho.id)\
+                           .order_by(Plano_Trabalho.atividade_sigla).all()
+    lista_atividades = [(str(a[1]), a[0]) for a in atividades]
+    lista_atividades.insert(0, ('', ''))
+    return lista_atividades
+
+
+def atribuir_atividade(user_id, atividade_id, nivel, usuario_id):
+    """
+    Atribui uma atividade do plano de trabalho a um usuário, se ele
+    ainda não a tiver. Retorna um dos status: 'ja_possui', 'atribuida'.
+    """
+    ja_possui_ids = [a[0] for a in atividades_atuais_usuario(user_id)]
+
+    if int(atividade_id) in ja_possui_ids:
+        return 'ja_possui'
+
+    ativ_para_user = Ativ_Usu(atividade_id=atividade_id, user_id=user_id, nivel=nivel)
+    db.session.add(ativ_para_user)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'aus')
+
+    return 'atribuida'
+
+
+def atividades_atuais_formatadas(user_id):
+    """Retorna as atividades atuais do usuário já formatadas para exibição no template."""
+    ativ_usu = atividades_atuais_usuario(user_id)
+
+    l_ativ_usu = []
+    for ativ in ativ_usu:
+        atividade_usu = db.session.query(Plano_Trabalho.atividade_sigla)\
+                          .filter(Plano_Trabalho.id == ativ.atividade_id).first()
+        l_ativ_usu.append([atividade_usu.atividade_sigla, ativ.nivel, ativ.id])
+
+    return l_ativ_usu
+
+
+def excluir_atividade_usuario(atividade_usu_id, usuario_id):
+    """Remove uma atividade atribuída a um usuário."""
+    atividade = Ativ_Usu.query.get_or_404(atividade_usu_id)
+
+    db.session.delete(atividade)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'xus')
