@@ -51,6 +51,7 @@ from itsdangerous import URLSafeTimedSerializer
 from flask import render_template, url_for, flash, redirect, request, Blueprint, abort
 from flask_login import login_user, current_user, logout_user, login_required
 from flask_mail import Message
+from wtforms import ValidationError
 from threading import Thread
 from datetime import datetime, date, timedelta, time
 from calendar import monthrange
@@ -67,67 +68,9 @@ from project.users.forms import RegistrationForm, LoginForm, UpdateUserForm, Ema
                                 LogForm, LogFormMan, VerForm, RelForm, AtivUsu, TrocaPasswordForm, CoordForm, TipoLogForm
 from project.core.views import cargaSICONV, chamadas_DW
 from project.demandas.views import registra_log_auto
+from project.users import services
 
 users = Blueprint('users',__name__)
-
-# helper function para envio de email em outra thread
-def send_async_email(msg):
-    """+--------------------------------------------------------------------------------------+
-       |Executa o envio de e-mails de forma assíncrona.                                       |
-       +--------------------------------------------------------------------------------------+
-    """
-    with app.app_context():
-        mail.send(msg)
-
-# helper function para enviar e-mail
-def send_email(subject, recipients, text_body, html_body):
-    """+--------------------------------------------------------------------------------------+
-       |Envia e-mails.                                                                        |
-       +--------------------------------------------------------------------------------------+
-    """
-    msg = Message(subject, recipients=recipients)
-    msg.body = text_body
-    msg.html = html_body
-    thr = Thread(target=send_async_email, args=[msg])
-    thr.start()
-
-# helper function que prepara email de conformação de endereço de e-mail
-def send_confirmation_email(user_email):
-    """+--------------------------------------------------------------------------------------+
-       |Preparação dos dados para e-mail de confirmação de usuário                            |
-       +--------------------------------------------------------------------------------------+
-    """
-    confirm_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
-
-    confirm_url = url_for(
-        'users.confirm_email',
-        token=confirm_serializer.dumps(user_email, salt='email-confirmation-salt'),
-        _external=True)
-
-    html = render_template(
-        'email_confirmation.html',
-        confirm_url=confirm_url)
-
-    send_email('Confirme seu endereço de e-mail', [user_email],'', html)
-
-# helper function que prepara email com token para resetar a senha
-def send_password_reset_email(user_email):
-    """+--------------------------------------------------------------------------------------+
-       |Preparação dos dados para e-mail de troca de senha.                                   |
-       +--------------------------------------------------------------------------------------+
-    """
-    password_reset_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
-
-    password_reset_url = url_for(
-        'users.reset_with_token',
-        token = password_reset_serializer.dumps(user_email, salt='password-reset-salt'),
-        _external=True)
-
-    html = render_template(
-        'email_senha_atualiza.html',
-        password_reset_url=password_reset_url)
-
-    send_email('Atualização de senha solicitada', [user_email],'', html)
 
 # registrar
 
@@ -143,69 +86,22 @@ def register():
 
     if form.validate_on_submit():
 
-        form.check_username(form.username)
+        try:
+            form.check_username(form.username)
+            form.check_email(form.email)
+        except ValidationError:
+            return render_template('register.html', form=form)
 
-        form.check_email(form.email)
+        services.registrar_usuario(
+            email=form.email.data,
+            username=form.username.data,
+            password=form.password.data,
+            coord=form.coord.data,
+            despacha0=form.despacha0,
+            despacha=form.despacha,
+            despacha2=form.despacha2,
+        )
 
-        qtd_users = db.session.query(func.count(User.id)).first()
-
-        if qtd_users[0] != 0:
-            version   = db.session.query(User.sversion).first()
-            role_user = 'user'
-        else:
-            version   = [1]
-            role_user = 'admin'
-
-        trab_conv   = db.session.query(Sistema.funcionalidade_conv).first()
-        trab_acordo = db.session.query(Sistema.funcionalidade_acordo).first()
-        trab_instru = db.session.query(Sistema.funcionalidade_instru).first()
-
-        if form.despacha0:
-            despacha0 = 1
-        else:
-            despacha0 = 0
-
-        if form.despacha:
-            despacha = 1
-        else:
-            despacha = 0
-
-        if form.despacha2:
-            despacha2 = 1
-        else:
-            despacha2 = 0    
-
-        user = User(email                      = form.email.data,
-                    username                   = form.username.data,
-                    plaintext_password         = form.password.data,
-                    despacha0                  = despacha0,
-                    despacha                   = despacha,
-                    despacha2                  = despacha2,
-                    coord                      = form.coord.data,
-                    role                       = role_user,
-                    email_confirmation_sent_on = datetime.now(),
-                    ativo                      = 0,
-                    sversion                   = version[0],
-                    cargo_func                 = 'a definir',
-                    trab_conv                  = trab_conv[0],
-                    trab_acordo                = trab_acordo[0],
-                    trab_instru                = trab_instru[0])
-
-        db.session.add(user)
-        db.session.commit()
-
-        last_id = db.session.query(User.id).order_by(User.id.desc()).first()
-
-        registra_log_auto(last_id[0],None,'usu')
-
-        coords = db.session.query(Coords.sigla).all()
-
-        if (form.coord.data,) not in coords:
-            coord = Coords(sigla = form.coord.data)
-            db.session.add(coord)
-            db.session.commit()
-
-        send_confirmation_email(user.email)
         flash('Usuário registrado! Verifique sua caixa de e-mail para confirmar o endereço.','sucesso')
         return redirect(url_for('core.inicio'))
 
@@ -220,22 +116,13 @@ def confirm_email(token):
        |é válido (igual ao enviado no momento do registro e tem menos de 1 hora de vida).     |
        +--------------------------------------------------------------------------------------+
     """
-    try:
-        confirm_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
-        email = confirm_serializer.loads(token, salt='email-confirmation-salt', max_age=3600)
-    except:
+    status, user = services.confirmar_email(token)
+
+    if status == 'invalido':
         flash('O link de confirmação é inválido ou expirou.', 'erro')
-        return redirect(url_for('users.login'))
-
-    user = User.query.filter_by(email=email).first()
-
-    if user.email_confirmed == 1:
+    elif status == 'ja_confirmado':
         flash('Confirmação já realizada. Por favor, faça o login.', 'erro')
     else:
-        user.email_confirmed = 1
-        user.email_confirmed_on = datetime.now()
-
-        db.session.commit()
         flash('Obrigado por confirmar seu endereço de e-mail! Caso já tenha uma janela do sistema aberta, pode fechar a anterior.','sucesso')
 
     return redirect(url_for('users.login'))
@@ -255,19 +142,15 @@ def reset():
 
     if form.validate_on_submit():
 
-        print('*** Procedimento de troca de senha com token executado para ',form.email.data)
+        status = services.solicitar_reset_senha(form.email.data)
 
-        try:
-            user = User.query.filter_by(email=form.email.data).first_or_404()
-        except:
+        if status == 'nao_encontrado':
             flash('Endereço de e-mail inválido!', 'erro')
             return render_template('email.html', form=form)
-
-        if user.email_confirmed == 1:
-            send_password_reset_email(user.email)
-            flash('Verifique a caixa de entrada de seu e-mail. Uma mensagem com o link de atualização de senha foi enviado.', 'sucesso')
-        else:
+        elif status == 'nao_confirmado':
             flash('Seu endereço de e-mail precisa ser confirmado antes de tentar efetuar uma troca de senha.', 'erro')
+        else:
+            flash('Verifique a caixa de entrada de seu e-mail. Uma mensagem com o link de atualização de senha foi enviado.', 'sucesso')
 
         return redirect(url_for('users.login'))
 
@@ -283,28 +166,18 @@ def reset_with_token(token):
        |Abre tela para o usuário informar nova senha.                                         |
        +--------------------------------------------------------------------------------------+
     """
-    try:
-        password_reset_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
-        email = password_reset_serializer.loads(token, salt='password-reset-salt', max_age=3600)
-    except:
-        flash('O link de atualização de senha é inválido ou expirou.', 'erro')
-        return redirect(url_for('users.login'))
-
     form = PasswordForm()
 
     if form.validate_on_submit():
-        try:
-            user = User.query.filter_by(email=email).first_or_404()
-        except:
+
+        status, user = services.redefinir_senha_com_token(token, form.password.data)
+
+        if status == 'token_invalido':
+            flash('O link de atualização de senha é inválido ou expirou.', 'erro')
+            return redirect(url_for('users.login'))
+        elif status == 'usuario_invalido':
             flash('Endereço de e-mail inválido!', 'erro')
             return redirect(url_for('users.login'))
-
-        #user.password = form.password.data
-        user.password_hash = generate_password_hash(form.password.data)
-
-        db.session.commit()
-
-        registra_log_auto(user.id,None,'sen')
 
         flash('Sua senha foi atualizada!', 'sucesso')
         return redirect(url_for('users.login'))
@@ -324,20 +197,13 @@ def troca_senha():
 
     if form.validate_on_submit():
 
-        if current_user.ativo != 1:
+        status = services.trocar_senha(current_user, form.password_atual.data, form.password_nova.data)
+
+        if status == 'inativo':
             flash('Usuário deve ser ativado antes de poder trocar senha!', 'erro')
             return redirect(url_for('users.login'))
-
-        if current_user.check_password(form.password_atual.data):    
-
-            current_user.password_hash = generate_password_hash(form.password_nova.data)
-
-            db.session.commit()
-
-            registra_log_auto(current_user.id,None,'sen')
-
+        elif status == 'trocada':
             logout_user()
-
             flash('Sua senha foi atualizada!', 'sucesso')
             return redirect(url_for('users.login'))
 
@@ -359,38 +225,26 @@ def login():
 
     if form.validate_on_submit():
 
-        user = User.query.filter_by(email=form.email.data).first()
+        status, user = services.autenticar(form.email.data, form.password.data)
 
-        if user is not None:
+        if status == 'autenticado':
+            login_user(user)
 
-            if user.check_password(form.password.data):
+            flash('Login bem sucedido!','sucesso')
 
-                if user.email_confirmed == 1:
+            next = request.args.get('next')
 
-                    user.last_logged_in = user.current_logged_in
-                    user.current_logged_in = datetime.now()
+            if next == None or not next[0] == '/':
+                next = url_for('core.inicio')
 
-                    db.session.commit()
+            return redirect(next)
 
-                    login_user(user)
-
-                    flash('Login bem sucedido!','sucesso')
-
-                    next = request.args.get('next')
-
-                    if next == None or not next[0] == '/':
-                        next = url_for('core.inicio')
-
-                    return redirect(next)
-
-                else:
-                    flash('Endereço de e-mail não confirmado ainda!','erro')
-
-            else:
-                flash('Senha não confere, favor verificar!','erro')
-
-        else:
+        elif status == 'nao_encontrado':
             flash('E-mail informado não encontrado, favor verificar!','erro')
+        elif status == 'senha_incorreta':
+            flash('Senha não confere, favor verificar!','erro')
+        elif status == 'nao_confirmado':
+            flash('Endereço de e-mail não confirmado ainda!','erro')
 
     return render_template('login.html',form=form)
 

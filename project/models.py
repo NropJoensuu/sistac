@@ -1190,7 +1190,7 @@ class User(db.Model, UserMixin):
 
         self.email                      = email
         self.username                   = username
-        self.password_hash              = generate_password_hash(plaintext_password)
+        self.password_hash              = generate_password_hash(plaintext_password, method='pbkdf2:sha256')
         #self.password = plaintext_password
         self.despacha                   = despacha
         self.email_confirmation_sent_on = email_confirmation_sent_on
