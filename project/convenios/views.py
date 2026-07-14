@@ -162,195 +162,27 @@ def lista_convenios_SICONV(lista,coord):
     +---------------------------------------------------------------------------------------+
     """
 
-    # pega unidade do usuário logado
-    unidade = db.session.query(User.coord).filter(User.id==current_user.id).first()
+    unidade_coord = services.coord_do_usuario(current_user.id)
 
     form = ListaForm()
 
     if form.validate_on_submit():
 
-        coord = form.coord.data
+        coord_form = form.coord.data
 
-        if coord == '' or coord == None:
-            coord = '*'
+        if coord_form == '' or coord_form is None:
+            coord_form = '*'
 
-        return redirect(url_for('convenios.lista_convenios_SICONV',lista=lista,coord=coord))
+        return redirect(url_for('convenios.lista_convenios_SICONV',lista=lista,coord=coord_form))
 
-    else:
+    convenio, coord_normalizado, data_carga = services.listar_convenios_siconv(lista, coord, unidade_coord)
+    form.coord.data = coord_normalizado
 
-        #
-        if coord == '*':
-
-            form.coord.data = ''
-
-            programa = db.session.query(Proposta.ID_PROPOSTA,
-                                        Proposta.ID_PROGRAMA,
-                                        Proposta.UF_PROPONENTE,
-                                        Programa.COD_PROGRAMA,
-                                        Programa_Interesse.sigla,
-                                        Programa.ANO_DISPONIBILIZACAO,
-                                        Programa_Interesse.coord)\
-                                        .join(Programa,Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
-                                        .outerjoin(Programa_Interesse,Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
-                                        .subquery()
-        elif coord == 'usu':
-
-            form.coord.data = unidade.coord
-
-            # se unidade for pai, pega filhos
-            filhos = db.session.query(Coords.sigla).filter(Coords.pai == unidade.coord).all()
-            l_filhos = [f.sigla for f in filhos]
-            l_filhos.append(unidade.coord)
-
-            if filhos:
-                unid = l_filhos
-                programa = db.session.query(Proposta.ID_PROPOSTA,
-                                        Proposta.ID_PROGRAMA,
-                                        Proposta.UF_PROPONENTE,
-                                        Programa.COD_PROGRAMA,
-                                        Programa_Interesse.sigla,
-                                        Programa.ANO_DISPONIBILIZACAO,
-                                        Programa_Interesse.coord)\
-                                        .join(Programa,Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
-                                        .outerjoin(Programa_Interesse,Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
-                                        .filter(Programa_Interesse.coord.in_(unid))\
-                                        .subquery()
-            else:
-                unid = unidade.coord
-                programa = db.session.query(Proposta.ID_PROPOSTA,
-                                        Proposta.ID_PROGRAMA,
-                                        Proposta.UF_PROPONENTE,
-                                        Programa.COD_PROGRAMA,
-                                        Programa_Interesse.sigla,
-                                        Programa.ANO_DISPONIBILIZACAO,
-                                        Programa_Interesse.coord)\
-                                        .join(Programa,Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
-                                        .outerjoin(Programa_Interesse,Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
-                                        .filter(Programa_Interesse.coord == unid)\
-                                        .subquery()
-        
-        else:
-
-            form.coord.data = coord
-
-            if coord == 'inst':
-                programa = db.session.query(Proposta.ID_PROPOSTA,
-                                            Proposta.ID_PROGRAMA,
-                                            Proposta.UF_PROPONENTE,
-                                            Programa.COD_PROGRAMA,
-                                            Programa_Interesse.sigla,
-                                            Programa.ANO_DISPONIBILIZACAO,
-                                            Programa_Interesse.coord)\
-                                            .join(Programa,Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
-                                            .outerjoin(Programa_Interesse,Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
-                                            .subquery()
-            else:
-                programa = db.session.query(Proposta.ID_PROPOSTA,
-                                            Proposta.ID_PROGRAMA,
-                                            Proposta.UF_PROPONENTE,
-                                            Programa.COD_PROGRAMA,
-                                            Programa_Interesse.sigla,
-                                            Programa.ANO_DISPONIBILIZACAO,
-                                            Programa_Interesse.coord)\
-                                            .join(Programa,Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
-                                            .join(Programa_Interesse,Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
-                                            .filter(Programa_Interesse.coord.like('%'+coord+'%'))\
-                                            .subquery()
-
-        if lista == 'todos':
-
-            convenio = db.session.query(Convenio.NR_CONVENIO,
-                                        programa.c.ANO_DISPONIBILIZACAO,
-                                        programa.c.coord,
-                                        DadosSEI.sei,
-                                        DadosSEI.epe,
-                                        programa.c.UF_PROPONENTE,
-                                        programa.c.sigla,
-                                        Convenio.SIT_CONVENIO,
-                                        Convenio.SUBSITUACAO_CONV,
-                                        Convenio.DIA_FIM_VIGENC_CONV,
-                                        Convenio.VL_REPASSE_CONV,
-                                        Convenio.VL_CONTRAPARTIDA_CONV,
-                                        Convenio.VL_DESEMBOLSADO_CONV,
-                                        Convenio.VL_INGRESSO_CONTRAPARTIDA,
-                                        (Convenio.VL_REPASSE_CONV - Convenio.VL_DESEMBOLSADO_CONV).label('vl_a_desembolsar'),
-                                        (Convenio.DIA_FIM_VIGENC_CONV - datetime.date.today()).label('prazo'))\
-                                        .filter(Convenio.DIA_PUBL_CONV != '')\
-                                        .join(programa, programa.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
-                                        .outerjoin(DadosSEI, Convenio.NR_CONVENIO == DadosSEI.nr_convenio)\
-                                        .order_by(programa.c.sigla.desc(),Convenio.SIT_CONVENIO.desc())\
-                                        .all()
-    #
-        elif lista == 'em execução':
-
-            convenio = db.session.query(Convenio.NR_CONVENIO,
-                                        programa.c.ANO_DISPONIBILIZACAO,
-                                        programa.c.coord,
-                                        DadosSEI.sei,
-                                        DadosSEI.epe,
-                                        programa.c.UF_PROPONENTE,
-                                        programa.c.sigla,
-                                        Convenio.SIT_CONVENIO,
-                                        Convenio.SUBSITUACAO_CONV,
-                                        Convenio.DIA_FIM_VIGENC_CONV,
-                                        Convenio.VL_REPASSE_CONV,
-                                        Convenio.VL_CONTRAPARTIDA_CONV,
-                                        Convenio.VL_DESEMBOLSADO_CONV,
-                                        Convenio.VL_INGRESSO_CONTRAPARTIDA,
-                                        (Convenio.VL_REPASSE_CONV - Convenio.VL_DESEMBOLSADO_CONV).label('vl_a_desembolsar'),
-                                        (Convenio.DIA_FIM_VIGENC_CONV - datetime.date.today()).label('prazo'))\
-                                        .join(programa, programa.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
-                                        .outerjoin(DadosSEI, Convenio.NR_CONVENIO == DadosSEI.nr_convenio)\
-                                        .filter(Convenio.SIT_CONVENIO == 'Em execução')\
-                                        .order_by(Convenio.SUBSITUACAO_CONV.desc(),Convenio.DIA_FIM_VIGENC_CONV,
-                                                  programa.c.sigla.desc())\
-                                        .all()
-
-        #
-        elif lista[:8] == 'programa':
-
-            convenio = db.session.query(Convenio.NR_CONVENIO,
-                                        programa.c.ANO_DISPONIBILIZACAO,
-                                        programa.c.coord,
-                                        DadosSEI.sei,
-                                        DadosSEI.epe,
-                                        programa.c.UF_PROPONENTE,
-                                        programa.c.sigla,
-                                        Convenio.SIT_CONVENIO,
-                                        Convenio.SUBSITUACAO_CONV,
-                                        Convenio.DIA_FIM_VIGENC_CONV,
-                                        Convenio.VL_REPASSE_CONV,
-                                        Convenio.VL_CONTRAPARTIDA_CONV,
-                                        Convenio.VL_DESEMBOLSADO_CONV,
-                                        Convenio.VL_INGRESSO_CONTRAPARTIDA,
-                                        (Convenio.VL_REPASSE_CONV - Convenio.VL_DESEMBOLSADO_CONV).label('vl_a_desembolsar'),
-                                        (Convenio.DIA_FIM_VIGENC_CONV - datetime.date.today()).label('prazo'))\
-                                        .join(programa, programa.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
-                                        .outerjoin(DadosSEI, Convenio.NR_CONVENIO == DadosSEI.nr_convenio)\
-                                        .filter(Convenio.DIA_PUBL_CONV != '',
-                                                programa.c.sigla == lista[21:],
-                                                programa.c.ANO_DISPONIBILIZACAO == lista[13:17])\
-                                        .order_by(Convenio.SIT_CONVENIO,Convenio.DIA_FIM_VIGENC_CONV,
-                                                  programa.c.sigla.desc())\
-                                        .all()
-
-        ## lê data de carga dos dados dos convênios
-        data_carga = db.session.query(RefSICONV.data_ref).first()
-
-        quantidade = len(convenio)
-
-        cria_csv('/app/project/static/convenios.csv',
-                 ['conv','ano','coord','sei','epe','uf','sigla','sit','subsit','fim','repasse','contrapartida','desemb','ingres_contra','vl_a_desembolsar','prazo'],
-                 convenio)    
-
-        # o comandinho mágico que permite fazer o download de um arquivo
-        send_from_directory('/app/project/static', 'convenios.csv') 
-
-        return render_template('list_convenios.html', convenio = convenio,   
-                                                      quantidade = quantidade, 
-                                                      lista = lista,
-                                                      form = form,
-                                                      data_carga = str(data_carga[0]))
+    return render_template('list_convenios.html', convenio = convenio,
+                                                  quantidade = len(convenio),
+                                                  lista = lista,
+                                                  form = form,
+                                                  data_carga = data_carga)
 
 #
 ## Mostra detalhes SICONV de um convênio e permite alterar dados SEI
