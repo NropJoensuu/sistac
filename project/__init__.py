@@ -29,6 +29,16 @@ db = SQLAlchemy(app)
 
 migrate = Migrate(app, db)
 
+
+# Filtro customizado do Jinja para formatar valores monetários em Real.
+# Registrado aqui (não em app.py) para funcionar independente de como a
+# aplicação é iniciada (python app.py, gunicorn, testes, etc.).
+@app.template_filter('converte_para_real')
+def converte_para_real(valor):
+    if valor:
+        return locale.currency(valor, symbol=False, grouping=True)
+    return valor
+
 mail = Mail(app)
 
 locale.setlocale( locale.LC_ALL, '' )
