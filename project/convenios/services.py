@@ -12,9 +12,11 @@ import csv
 import os.path
 import datetime as dt
 import locale
+import math
 from datetime import date
 from calendar import monthrange
 
+from folium import Map, Circle
 from fpdf import FPDF
 from sqlalchemy import func, or_
 from sqlalchemy.sql import label
@@ -796,3 +798,352 @@ def mensagens_siconv():
     data_ref = msgs[0].data_ref if msgs else None
 
     return msgs, data_ref
+
+
+# =============================================================================
+# Dashboards / mapas
+# =============================================================================
+
+def _unidades_hierarquia(unidade):
+    """Retorna a lista de coordenações a considerar (a própria unidade + filhas, se houver)."""
+    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
+
+    if hierarquia:
+        l_unid = [f.sigla for f in hierarquia]
+        l_unid.append(unidade)
+        return l_unid
+
+    return [unidade]
+
+
+def quadro_convenios(unidade):
+    """
+    Monta o quadro de convênios em execução, cruzando UF x Programa,
+    para a coordenação do usuário (e suas filhas, se houver).
+    """
+    l_unid = _unidades_hierarquia(unidade)
+
+    programas = db.session.query(Programa.ID_PROGRAMA, Programa_Interesse.sigla,
+                                 label('UF', Proposta.UF_PROPONENTE), Proposta.ID_PROPOSTA)\
+                          .join(Proposta, Proposta.ID_PROGRAMA == Programa.ID_PROGRAMA)\
+                          .join(Programa_Interesse, Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
+                          .filter(Programa_Interesse.coord.in_(l_unid))\
+                          .subquery()
+
+    convenios = db.session.query(func.count(Convenio.NR_CONVENIO), programas.c.sigla,
+                                 func.sum(Convenio.VL_GLOBAL_CONV), programas.c.UF)\
+                          .filter(Convenio.SIT_CONVENIO == "Em execução")\
+                          .join(programas, programas.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
+                          .order_by(programas.c.UF, programas.c.sigla)\
+                          .group_by(programas.c.UF, programas.c.sigla)\
+                          .all()
+
+    ufs = sorted(set(uf.UF for uf in convenios))
+    programas_int = sorted(set(p.sigla for p in convenios))
+
+    data_carga = db.session.query(RefSICONV.data_ref).first()
+
+    convenios_s = []
+    for conv in convenios:
+        conv_s = list(conv)
+        if conv_s[2] is not None:
+            conv_s[2] = locale.currency(conv_s[2], symbol=False, grouping=True)
+        convenios_s.append(conv_s)
+
+    linhas = []
+    for uf in ufs:
+        linha = []
+        for prog in programas_int:
+            flag = False
+            item = []
+            for conv in convenios_s:
+                if conv[3] == uf:
+                    if conv[1] == prog:
+                        linha.append(conv)
+                        flag = True
+                    else:
+                        item = [0, prog, '', uf]
+
+            if not flag:
+                linha.append(item)
+
+        linhas.append(linha)
+
+    return {
+        'quantidade': len(ufs),
+        'programas': programas_int,
+        'linhas': linhas,
+        'data_carga': str(data_carga[0]),
+    }
+
+
+# Coordenadas aproximadas (latitude, longitude) do centro de cada UF, usadas
+# para posicionar os círculos no mapa do Brasil.
+_GPS_UF = {
+    'AC': [-9.977916, -67.826068], 'AL': [-9.649433, -35.709335],
+    'AM': [-3.074759, -60.028723], 'AP': [0.052334, -51.070093],
+    'BA': [-13.008304, -38.512027], 'CE': [-3.795849, -38.497930],
+    'DF': [-15.710702, -47.911077], 'ES': [-20.276832, -40.300442],
+    'GO': [-16.680903, -49.250701], 'MA': [-2.501711, -44.284316],
+    'MG': [-19.884511, -43.915749], 'MS': [-20.447545, -54.603542],
+    'MT': [-15.566057, -56.072258], 'PA': [-1.454934, -48.475778],
+    'PB': [-7.205724, -35.921335], 'PE': [-8.060426, -34.901544],
+    'PI': [-5.096300, -42.798928], 'PR': [-25.446918, -49.245448],
+    'RJ': [-22.904571, -43.173827], 'RN': [-5.829595, -35.212017],
+    'RO': [-8.625350, -63.844920], 'RR': [2.930872, -60.672953],
+    'RS': [-30.028724, -51.228277], 'SC': [-27.571250, -48.509038],
+    'SE': [-10.909057, -37.050032], 'SP': [-23.536390, -46.714247],
+    'TO': [-10.182099, -48.331027],
+}
+
+_CORES_PROGRAMA = {
+    'PRONEX': 'blue', 'PRONEM': 'orange', 'PPP': 'green', 'EMENDA': 'purple',
+}
+
+
+def gerar_mapa_brasil_convenios():
+    """
+    Gera o mapa (folium) de convênios por UF, com um círculo por
+    combinação UF/programa, cujo raio é proporcional à quantidade de
+    convênios.
+    """
+    programa_siconv = db.session.query(
+        Proposta.ID_PROPOSTA, Proposta.ID_PROGRAMA, Proposta.UF_PROPONENTE,
+        Programa.COD_PROGRAMA, Programa_Interesse.sigla, Programa.ANO_DISPONIBILIZACAO
+    ).join(Programa, Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
+     .outerjoin(Programa_Interesse, Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
+     .subquery()
+
+    convenios = db.session.query(func.count(Convenio.NR_CONVENIO), programa_siconv.c.sigla,
+                                 func.sum(Convenio.VL_GLOBAL_CONV), programa_siconv.c.UF_PROPONENTE)\
+                          .filter(Convenio.DIA_PUBL_CONV != '')\
+                          .join(programa_siconv, programa_siconv.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
+                          .order_by(programa_siconv.c.UF_PROPONENTE, programa_siconv.c.sigla)\
+                          .group_by(programa_siconv.c.UF_PROPONENTE)\
+                          .group_by(programa_siconv.c.sigla)\
+                          .all()
+
+    convenios_s = []
+    for conv in convenios:
+        conv_s = list(conv)
+        if conv_s[2] is not None:
+            conv_s[2] = locale.currency(conv_s[2], symbol=False, grouping=True)
+        if conv_s[1] is not None:
+            convenios_s.append(conv_s)
+
+    progs = {}
+    programas = db.session.query(Programa_Interesse.sigla)\
+                          .order_by(Programa_Interesse.sigla)\
+                          .group_by(Programa_Interesse.sigla).all()
+
+    for i, p in enumerate(programas):
+        if i == 0:
+            progs[p.sigla] = [0, 0]
+        else:
+            ang = (i - 1) * (2 * math.pi / len(programas))
+            progs[p.sigla] = [0.4 * math.cos(ang), 0.4 * math.sin(ang)]
+
+    linha = []
+    for conv in convenios_s:
+        conv.append(_GPS_UF[conv[3]])
+        conv.append(progs[conv[1]])
+        linha.append(conv)
+
+    m = Map(location=[-15.7, -47.9], tiles='OpenStreetMap', control_scale=True,
+            zoom_start=2, min_zoom=2)
+    m.fit_bounds([[-34, -74], [3, -34]])
+
+    for l in linha:
+        tip = '<b>' + l[3] + ' - ' + l[1] + '</b>' + '<br>' + str(l[0]) + ' conv&ecirc;nio(s)' + '<br>' + 'Valor Global: ' + l[2]
+        cor = _CORES_PROGRAMA.get(l[1], 'gray')
+
+        Circle(
+            location=[float(l[4][0]) + float(l[5][0]), float(l[4][1]) + float(l[5][1])],
+            radius=12000 * int(l[0]),
+            tooltip=tip,
+            fill=True,
+            fill_opacity=0.2,
+            color=cor,
+        ).add_to(m)
+
+    return m._repr_html_()
+
+
+def _percentuais_convenio(conv):
+    """
+    Calcula os percentuais de repasse/desembolso e de ingresso de
+    contrapartida de um convênio, evitando divisão por zero (checando
+    sempre o denominador, não o numerador).
+    """
+    if not conv.VL_REPASSE_CONV:
+        percent_repass_desemb = 0
+    else:
+        percent_repass_desemb = round(100 * conv.VL_DESEMBOLSADO_CONV / conv.VL_REPASSE_CONV)
+
+    if not conv.VL_CONTRAPARTIDA_CONV:
+        percent_ingre_contrap = 0
+    else:
+        percent_ingre_contrap = round(100 * conv.VL_INGRESSO_CONTRAPARTIDA / conv.VL_CONTRAPARTIDA_CONV)
+
+    return percent_repass_desemb, percent_ingre_contrap
+
+
+def _listar_convenios_quadro(unidade, filtros_extra, order_by):
+    """
+    Consulta compartilhada por lista_convenios_quadro, lista_convenios_uf
+    e lista_convenios_prog — a única diferença entre as três telas é o
+    filtro aplicado (UF+programa, só UF, ou só programa).
+    """
+    l_unid = _unidades_hierarquia(unidade)
+
+    programa_siconv = db.session.query(
+        Proposta.ID_PROPOSTA, Proposta.ID_PROGRAMA, Proposta.UF_PROPONENTE,
+        Programa.COD_PROGRAMA, Programa_Interesse.sigla, Programa.ANO_DISPONIBILIZACAO
+    ).join(Programa, Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
+     .join(Programa_Interesse, Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
+     .filter(Programa_Interesse.coord.in_(l_unid))\
+     .subquery()
+
+    query = db.session.query(
+        Convenio.NR_CONVENIO, DadosSEI.nr_convenio, programa_siconv.c.ANO_DISPONIBILIZACAO,
+        DadosSEI.sei, DadosSEI.epe, programa_siconv.c.UF_PROPONENTE, programa_siconv.c.sigla,
+        Convenio.SIT_CONVENIO, Convenio.SUBSITUACAO_CONV, Convenio.DIA_FIM_VIGENC_CONV,
+        Convenio.VL_GLOBAL_CONV, DadosSEI.id, Convenio.VL_REPASSE_CONV,
+        Convenio.VL_DESEMBOLSADO_CONV, Convenio.VL_CONTRAPARTIDA_CONV,
+        Convenio.VL_INGRESSO_CONTRAPARTIDA
+    ).filter(Convenio.SIT_CONVENIO == "Em execução", *filtros_extra(programa_siconv))\
+     .join(programa_siconv, programa_siconv.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
+     .outerjoin(DadosSEI, Convenio.NR_CONVENIO == DadosSEI.nr_convenio)\
+     .order_by(*order_by(programa_siconv))\
+     .all()
+
+    data_carga = db.session.query(RefSICONV.data_ref).first()
+
+    convenio_s = []
+    for conv in query:
+        conv_s = list(conv)
+        if conv_s[10] is not None:
+            conv_s[10] = locale.currency(conv_s[10], symbol=False, grouping=True)
+        if conv_s[12] is not None:
+            conv_s[12] = locale.currency(conv_s[12], symbol=False, grouping=True)
+        if conv_s[14] is not None:
+            conv_s[14] = locale.currency(conv_s[14], symbol=False, grouping=True)
+        if conv_s[9] is not None:
+            conv_s[9] = conv_s[9].strftime('%x')
+
+        percent_repass_desemb, percent_ingre_contrap = _percentuais_convenio(conv)
+
+        conv_s.append((conv.DIA_FIM_VIGENC_CONV - dt.date.today()).days)
+        conv_s.append(percent_repass_desemb)
+        conv_s.append(percent_ingre_contrap)
+
+        convenio_s.append(conv_s)
+
+    return {
+        'convenio': convenio_s,
+        'quantidade': len(query),
+        'data_carga': str(data_carga[0]),
+    }
+
+
+def listar_convenios_quadro(unidade, uf, programa):
+    """Lista de convênios em execução de uma UF em um programa específico."""
+    dados = _listar_convenios_quadro(
+        unidade,
+        filtros_extra=lambda p: (p.c.UF_PROPONENTE == uf, p.c.sigla == programa),
+        order_by=lambda p: (Convenio.DIA_FIM_VIGENC_CONV, p.c.ANO_DISPONIBILIZACAO.desc()),
+    )
+    dados['uf'] = uf
+    dados['programa'] = programa
+    return dados
+
+
+def listar_convenios_uf(unidade, uf):
+    """Lista de convênios em execução de uma UF, em todos os programas."""
+    dados = _listar_convenios_quadro(
+        unidade,
+        filtros_extra=lambda p: (p.c.UF_PROPONENTE == uf,),
+        order_by=lambda p: (p.c.sigla, Convenio.SIT_CONVENIO, Convenio.DIA_FIM_VIGENC_CONV, p.c.ANO_DISPONIBILIZACAO.desc()),
+    )
+    dados['uf'] = uf
+    dados['programa'] = 'todos'
+    return dados
+
+
+def listar_convenios_prog(unidade, programa):
+    """Lista de convênios em execução de um programa específico, em todas as UFs."""
+    dados = _listar_convenios_quadro(
+        unidade,
+        filtros_extra=lambda p: (p.c.sigla == programa,),
+        order_by=lambda p: (Convenio.DIA_FIM_VIGENC_CONV, p.c.ANO_DISPONIBILIZACAO.desc()),
+    )
+    dados['uf'] = '*'
+    dados['programa'] = programa
+    return dados
+
+
+def resumo_convenios(unidade):
+    """
+    Monta o resumo de convênios por programa da coordenação (e suas
+    filhas, se houver): quantidade, valores agregados e percentuais.
+    """
+    l_unid = _unidades_hierarquia(unidade)
+
+    convenios_exec = db.session.query(Convenio.ID_PROPOSTA, label('conv_exec', Convenio.NR_CONVENIO))\
+                               .filter(Convenio.SIT_CONVENIO == 'Em execução')\
+                               .subquery()
+
+    programas = db.session.query(
+        Programa_Interesse.cod_programa, Programa_Interesse.sigla,
+        label('qtd', func.count(Convenio.NR_CONVENIO)),
+        label('vl_global', func.sum(Convenio.VL_GLOBAL_CONV)),
+        label('vl_repasse', func.sum(Convenio.VL_REPASSE_CONV)),
+        label('vl_empenhado', func.sum(Convenio.VL_EMPENHADO_CONV)),
+        label('vl_desembolsado', func.sum(Convenio.VL_DESEMBOLSADO_CONV)),
+        label('vl_contrapartida', func.sum(Convenio.VL_CONTRAPARTIDA_CONV)),
+        label('vl_ingresso_contra', func.sum(Convenio.VL_INGRESSO_CONTRAPARTIDA)),
+        label('qtd_exec', func.count(convenios_exec.c.conv_exec)),
+    ).join(Programa, Programa.COD_PROGRAMA == Programa_Interesse.cod_programa)\
+     .join(Proposta, Proposta.ID_PROGRAMA == Programa.ID_PROGRAMA)\
+     .join(Convenio, Convenio.ID_PROPOSTA == Proposta.ID_PROPOSTA)\
+     .filter(Convenio.DIA_PUBL_CONV != '', Programa_Interesse.coord.in_(l_unid))\
+     .outerjoin(convenios_exec, convenios_exec.c.ID_PROPOSTA == Proposta.ID_PROPOSTA)\
+     .group_by(Programa_Interesse.sigla, Programa_Interesse.cod_programa)\
+     .order_by(Programa_Interesse.sigla.desc(), Programa_Interesse.cod_programa)\
+     .all()
+
+    data_carga = db.session.query(RefSICONV.data_ref).first()
+
+    programas_s = []
+    for prog in programas:
+        prog_s = list(prog)
+
+        prog_s[3] = locale.currency(none_0(prog_s[3]), symbol=False, grouping=True)
+        prog_s[4] = locale.currency(none_0(prog_s[4]), symbol=False, grouping=True)
+        prog_s[5] = locale.currency(none_0(prog_s[5]), symbol=False, grouping=True)
+        prog_s[6] = locale.currency(none_0(prog_s[6]), symbol=False, grouping=True)
+        prog_s[7] = locale.currency(none_0(prog_s[7]), symbol=False, grouping=True)
+        prog_s[8] = locale.currency(none_0(prog_s[8]), symbol=False, grouping=True)
+
+        # Sempre acrescenta os 3 percentuais (com 0 quando o denominador é
+        # zero), pois o template acessa essas posições incondicionalmente.
+        if none_0(prog.vl_repasse) != 0:
+            empenhado_repasse = round(100 * float(none_0(prog.vl_empenhado)) / float(none_0(prog.vl_repasse)))
+            desembolsado_repasse = round(100 * float(none_0(prog.vl_desembolsado)) / float(none_0(prog.vl_repasse)))
+        else:
+            empenhado_repasse = 0
+            desembolsado_repasse = 0
+
+        prog_s.append(empenhado_repasse)
+        prog_s.append(desembolsado_repasse)
+
+        if none_0(prog.vl_contrapartida) != 0:
+            ingressado_contrapartida = round(100 * float(none_0(prog.vl_ingresso_contra)) / float(none_0(prog.vl_contrapartida)))
+        else:
+            ingressado_contrapartida = 0
+
+        prog_s.append(ingressado_contrapartida)
+
+        programas_s.append(prog_s)
+
+    return programas_s, str(data_carga[0])
