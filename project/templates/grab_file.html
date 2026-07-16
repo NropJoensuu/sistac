@@ -14,11 +14,14 @@
               Homologados
             {% elif data_ref == 'sigef' %}
               Carga situações SIGEF
-            {% elif data_ref != '' %}
+            {% elif data_ref == '' %}
+              Mensagens SICONV
+            {% elif data_ref %}
              <p>Folha de Pagamento</p>
               Data de referência da última carga: <b>{{ data_ref.strftime('%x') }}</b> <p>(sem discriminação de programa)</p>
             {% else %}
-              Mensagens SICONV
+             <p>Folha de Pagamento</p>
+              Nenhuma carga realizada ainda.
             {% endif %}
           </div>
         </div>
