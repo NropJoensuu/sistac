@@ -59,6 +59,8 @@ import traceback
 
 core = Blueprint("core",__name__)
 
+from project.core import services
+
 # função que pega dados do DW
 
 def consultaDW(**entrada):
@@ -1664,80 +1666,10 @@ def index():
     |Ações quando o aplicativo é colocado no ar.                                            |
     +---------------------------------------------------------------------------------------+
     """
-    sistema = db.session.query(Sistema).first()
+    sistema = services.dados_sistema()
 
-    # print ('***** Início do sistema *****')
+    services.agendar_cargas_iniciais()
 
-    if sistema.carga_auto == 1:   
-
-        # pega último agendamento
-        log_agenda_ant_envio = db.session.query(Log_Auto.user_id, Log_Auto.id, Log_Auto.tipo_registro)\
-                                         .filter(Log_Auto.tipo_registro == 'agc')\
-                                         .order_by(Log_Auto.id.desc())\
-                                         .first()
-
-
-        id_user = log_agenda_ant_envio.user_id
-   
-
-        # AGENDA CARGA SICONV NA INICIALIZAÇÃO DO SISTEMA
-
-        id_1 = 'carga_siconv'                                                              
-
-        try:
-            job_existente = sched.get_job(id_1)
-            if job_existente:
-                executa = False
-            else:
-                executa = True      
-        except:
-            executa = True
-
-        if executa:
-
-            dia_semana = 'mon-fri'
-            hora       = 8
-            minuto     = 13
-
-            msg = ('*** Agendamento inicial '+id_1+', rodando '+dia_semana+', às '+str(hora)+':'+str(minuto)+' ***')
-            print(msg)
-            try:
-                sched.add_job(trigger='cron', id=id_1, func=cargaSICONV, day_of_week=dia_semana, hour=hora, minute=minuto, misfire_grace_time=3600, coalesce=True)
-                sched.start()
-            except:
-                sched.reschedule_job(id_1, trigger='cron', day_of_week=dia_semana, hour=hora, minute=minuto)
-
-            registra_log_auto(id_user,None,'agi - agendamento cargaSICONV.')    
-
-        # AGENDA CARGA DW NA INICIALIZAÇÃO DO SISTEMA
-        
-        id_2 = 'carga_chamadas_DW'                                                              
-
-        try:
-            job_existente = sched.get_job(id_2)
-            if job_existente:
-                executa = False
-            else:
-                executa = True      
-        except:
-            executa = True
-
-        if executa:
-
-            dia    ='2nd tue'
-            hora   = 18
-            minuto = 18
-
-            msg = ('*** Agendamento inicial '+id_2+', rodando '+dia+', às '+str(hora)+':'+str(minuto)+' ***')
-            print(msg)
-            try:
-                sched.add_job(trigger='cron', id=id_2, func=chamadas_DW, day=dia, hour=hora, minute=minuto, misfire_grace_time=3600, coalesce=True)
-                sched.start()
-            except:
-                sched.reschedule_job(id_2, trigger='cron', day=dia, hour=hora, minute=minuto)
-
-            registra_log_auto(id_user,None,'agi - agendamento chamadas_DW.')    
-        
     return render_template ('index.html',sistema=sistema) 
 
 @core.route('/inicio')
@@ -1747,7 +1679,7 @@ def inicio():
     |Apresenta a tela inicial do aplicativo.                                                |
     +---------------------------------------------------------------------------------------+
     """
-    sistema = db.session.query(Sistema).first()
+    sistema = services.dados_sistema()
 
     return render_template ('index.html',sistema=sistema)    
 
