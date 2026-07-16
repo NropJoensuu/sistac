@@ -1453,19 +1453,17 @@ def cria_chamada(id_acordo_convenio):
     form = ChamadaForm()
 
     if form.validate_on_submit():
-        chamada = Chamadas(sei              = form.sei.data,
-                           chamada          = form.chamada.data,
-                           qtd_projetos     = form.qtd_projetos.data,
-                           vl_total_chamada = float(form.vl_total_chamada.data.replace('.','').replace(',','.')),
-                           doc_sei          = form.doc_sei.data,
-                           obs              = form.obs.data,
-                           id_relaciona     = str(id_acordo_convenio),
-                           qtd_processos    = 0)
 
-        db.session.add(chamada)
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'hom')
+        services.criar_chamada(
+            id_acordo_convenio=id_acordo_convenio,
+            sei=form.sei.data,
+            chamada_nome=form.chamada.data,
+            qtd_projetos=form.qtd_projetos.data,
+            vl_total_chamada_str=form.vl_total_chamada.data,
+            doc_sei=form.doc_sei.data,
+            obs=form.obs.data,
+            usuario_id=current_user.id,
+        )
 
         flash('Chamada registrada!','sucesso')
 
@@ -1490,34 +1488,35 @@ def update_chamada(id):
     +---------------------------------------------------------------------------------------+
     """
 
-    chamada = Chamadas.query.get_or_404(id)
+    chamada = services.buscar_chamada(id)
 
     form = ChamadaForm()
 
     if form.validate_on_submit():
 
-        chamada.sei              = form.sei.data
-        chamada.chamada          = form.chamada.data
-        chamada.qtd_projetos     = form.qtd_projetos.data
-        chamada.vl_total_chamada = float(form.vl_total_chamada.data.replace('.','').replace(',','.'))
-        chamada.doc_sei          = form.doc_sei.data
-        chamada.obs              = form.obs.data
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'hom')
+        services.atualizar_chamada(
+            id=id,
+            sei=form.sei.data,
+            chamada_nome=form.chamada.data,
+            qtd_projetos=form.qtd_projetos.data,
+            vl_total_chamada_str=form.vl_total_chamada.data,
+            doc_sei=form.doc_sei.data,
+            obs=form.obs.data,
+            usuario_id=current_user.id,
+        )
 
         flash('Chamada homologada atualizada!','sucesso')
         return redirect(url_for('core.inicio'))
     #
     # traz a informação atual do registro SEI
     elif request.method == 'GET':
-        form.sei.data              = chamada.sei
-        form.chamada.data          = chamada.chamada
-        form.qtd_projetos.data     = chamada.qtd_projetos
-        form.vl_total_chamada.data = locale.currency( chamada.vl_total_chamada, symbol=False, grouping = True )
-        form.doc_sei.data          = chamada.doc_sei
-        form.obs.data              = chamada.obs
+        dados = services.formata_chamada_para_edicao(chamada)
+        form.sei.data              = dados['sei']
+        form.chamada.data          = dados['chamada']
+        form.qtd_projetos.data     = dados['qtd_projetos']
+        form.vl_total_chamada.data = dados['vl_total_chamada']
+        form.doc_sei.data          = dados['doc_sei']
+        form.obs.data              = dados['obs']
 
     return render_template('add_chamada.html', form=form)
 
@@ -1544,106 +1543,11 @@ def carrega_homologados(chamada_id):
 
     if form.validate_on_submit():
 
-        tempdirectory = tempfile.gettempdir()
-
-        f = form.arquivo.data
-        fname = secure_filename(f.filename)
-        homologados = os.path.join(tempdirectory, fname)
-        f.save(homologados)
+        homologados = services.salvar_arquivo_upload(form.arquivo.data)
 
         print ('***  ARQUIVO ***',homologados)
-        #
-        # procedimentos de carga do arquivo de homologados
-        campos_homologados_para_db = ['Prioridade','Nota','CPF','Nome','Mod','Niv', 'Título','Área','Valor']
 
-        print ('<<',dt.now().strftime("%x %X"),'>> ',' Carga Homologados iniciada...')
-
-        # abre arquivo (book), planilha (sheet) e linha com os nomes dos campos (linha_cabeçalho)
-
-        book = xlrd.open_workbook(filename=homologados,ragged_rows=True)
-        planilha = book.sheet_by_index(0)
-
-        linha_cabeçalho = planilha.row_values(0, start_colx=0, end_colx=None)
-
-        for campo in campos_homologados_para_db:
-            if campo not in linha_cabeçalho:
-                print ('** ATENÇÃO: o campo ',campo,' não existe na planinha original, verifique o parâmetro inserido. **')
-                flash('ERRO! O campo '+str(campo)+' não existe na planinha original, verifique o parâmetro inserido.','erro')
-                return redirect(url_for('core.inicio'))
-
-        qtd_linhas = planilha.nrows - 1
-
-        print ('\n')
-        print ('Planilha: Homologados')
-        print (f'Cabeçalho original: {len(linha_cabeçalho)} campos')
-        print (f'Cabeçalho após extração: {len(campos_homologados_para_db)} campos')
-        print (f'Quantidade de registros na planilha: {qtd_linhas}')
-        print ('Começará a extração com o cabeçalho na linha ', 1)
-        print ('\n')
-
-        # varre linha por linha da planilha de entrada
-
-        print ('<<',dt.now().strftime("%x %X"),'>> ',' Gravando dados no banco...')
-        print ('\n')
-
-        for i in range(qtd_linhas):
-
-            linha_base = planilha.row_values(i+1, start_colx=0)
-
-            linha = []
-            iter  = 0
-
-            # pega os campos de interess na planilha conforme o defindo em campos_homologados_para_db
-
-            for campo in campos_homologados_para_db:
-
-                dado_célula = planilha.cell_value(i+1, linha_cabeçalho.index(campo))
-                tipo_célula = planilha.cell_type (i+1, linha_cabeçalho.index(campo))
-
-                if str(dado_célula) == '':  # células vazias recebem None
-                    dado_célula = None
-
-                linha.append(dado_célula)
-
-            # verifica se o registro a ser inserido já não existe no banco, identificado por chamada, cpf e nome
-            homologado_pre_existente = db.session.query(Homologados)\
-                                           .filter_by(chamada_id = chamada_id, cpf = linha[2], nome = linha[3], prioridade = linha[0])\
-                                           .first()
-            # não existindo, grava:
-            if homologado_pre_existente == None:
-
-                # coloca '*' no nível, caso ele venha vazio
-                if linha[5] == '' or linha[5] == None:
-                    linha[5] = '*'
-
-                homologado = Homologados(chamada_id = chamada_id,
-                                         prioridade = linha[0],
-                                         nota       = linha[1],
-                                         cpf        = linha[2],
-                                         nome       = linha[3],
-                                         mod        = linha[4],
-                                         niv        = linha[5],
-                                         titulo     = linha[6],
-                                         area       = linha[7],
-                                         valor      = linha[8])
-
-                db.session.add(homologado)
-            # existindo, altera:
-            else:
-
-                if linha[1] != None:
-                    homologado_pre_existente.nota = linha[1]
-                if linha[6] != None:
-                    homologado_pre_existente.titulo = linha[6]
-                if linha[7] != None:
-                    homologado_pre_existente.area = linha[7]
-                if linha[8] != None:
-                    homologado_pre_existente.valor = linha[8]
-
-        db.session.commit()
-
-        print ('<<',dt.now().strftime("%x %X"),'>> ',' Dados dos homologados carregados.')
-
+        services.carregar_homologados(chamada_id, homologados)
 
         registra_log_auto(current_user.id,None,'car')
 
@@ -1663,19 +1567,12 @@ def lista_homologados(chamada_id):
     +---------------------------------------------------------------------------------------+
     """
 
-    chamada = db.session.query(Chamadas)\
-                        .filter(Chamadas.id == chamada_id).first()
-
-    homologados  = db.session.query(Homologados)\
-                             .filter(Homologados.chamada_id == chamada_id)\
-                             .order_by(Homologados.prioridade, Homologados.nota.desc()).all()
-
-    qtd_homologados = len(homologados)
+    chamada, homologados = services.buscar_chamada_e_homologados(chamada_id)
 
     return render_template('lista_homologados.html', chamada_id=chamada_id,
                                                      chamada=chamada,
                                                      homologados=homologados,
-                                                     qtd_homologados=qtd_homologados)
+                                                     qtd_homologados=len(homologados))
 
 
 ### inserir ou alterar projeto/bolsista homologado
@@ -1697,59 +1594,19 @@ def edita_homologado(chamada_id,homologado_id):
     if form.validate_on_submit():
 
         if homologado_id == 0:
-
-            if form.nota.data is not None and form.nota.data != '':
-                nota  = float(form.nota.data.replace('.','').replace(',','.'))
-            else:
-                nota = None
-
-            if form.valor.data is not None and form.valor.data != '':
-                valor = float(form.valor.data.replace('.','').replace(',','.'))
-            else:
-                valor = None
-
-            homologado = Homologados(chamada_id = chamada_id,
-                                     prioridade = form.prioridade.data,
-                                     nota       = nota,
-                                     cpf        = form.cpf.data,
-                                     nome       = form.nome.data,
-                                     mod        = form.mod.data,
-                                     niv        = form.niv.data,
-                                     titulo     = form.titulo.data,
-                                     area       = form.area.data,
-                                     valor      = valor)
-
-            db.session.add(homologado)
-            db.session.commit()
-
+            services.criar_homologado(
+                chamada_id=chamada_id, prioridade=form.prioridade.data, nota_str=form.nota.data,
+                cpf=form.cpf.data, nome=form.nome.data, mod=form.mod.data, niv=form.niv.data,
+                titulo=form.titulo.data, area=form.area.data, valor_str=form.valor.data,
+                usuario_id=current_user.id,
+            )
         else:
-
-            homologado = Homologados.query.get_or_404(homologado_id)
-
-            if form.nota.data != None and form.nota.data != '':
-                nota  = float(form.nota.data.replace('.','').replace(',','.'))
-            else:
-                nota = None
-
-            if form.valor.data is not None and form.valor.data != '':
-                valor = float(form.valor.data.replace('.','').replace(',','.'))
-            else:
-                valor = None
-
-            homologado.chamada_id = chamada_id
-            homologado.prioridade = form.prioridade.data
-            homologado.nota       = nota
-            homologado.cpf        = form.cpf.data
-            homologado.nome       = form.nome.data
-            homologado.mod        = form.mod.data
-            homologado.niv        = form.niv.data
-            homologado.titulo     = form.titulo.data
-            homologado.area       = form.area.data
-            homologado.valor      = valor
-
-            db.session.commit()
-
-        registra_log_auto(current_user.id,None,'bop')
+            services.atualizar_homologado(
+                homologado_id=homologado_id, chamada_id=chamada_id, prioridade=form.prioridade.data,
+                nota_str=form.nota.data, cpf=form.cpf.data, nome=form.nome.data, mod=form.mod.data,
+                niv=form.niv.data, titulo=form.titulo.data, area=form.area.data, valor_str=form.valor.data,
+                usuario_id=current_user.id,
+            )
 
         flash('Projeto ou bolsista registrado!','sucesso')
 
@@ -1760,24 +1617,18 @@ def edita_homologado(chamada_id,homologado_id):
 
         if homologado_id != 0:
 
-            homologados = db.session.query(Homologados)\
-                                    .filter(Homologados.id==homologado_id).first()
+            homologado = services.buscar_homologado(homologado_id)
+            dados = services.formata_homologado_para_edicao(homologado)
 
-            form.prioridade.data = homologados.prioridade
-            if homologados.nota != None and homologados.nota != '':
-                form.nota.data   = str(homologados.nota).replace(',','').replace('.',',')
-            else:
-                form.nota.data   = homologados.nota
-            form.cpf.data        = homologados.cpf
-            form.nome.data       = homologados.nome
-            form.mod.data        = homologados.mod
-            form.niv.data        = homologados.niv
-            form.titulo.data     = homologados.titulo
-            form.area.data       = homologados.area
-            if homologados.valor != None and homologados.valor != '':
-                form.valor.data  = locale.currency(homologados.valor, symbol=False, grouping = True )
-            else:
-                form.valor.data  = homologados.valor
+            form.prioridade.data = dados['prioridade']
+            form.nota.data       = dados['nota']
+            form.cpf.data        = dados['cpf']
+            form.nome.data       = dados['nome']
+            form.mod.data        = dados['mod']
+            form.niv.data        = dados['niv']
+            form.titulo.data     = dados['titulo']
+            form.area.data       = dados['area']
+            form.valor.data      = dados['valor']
 
     return render_template('add_homologado.html', form=form, homologado_id=homologado_id)
 #
@@ -1793,14 +1644,7 @@ def deleta_homologado(chamada_id,homologado_id):
     |Recebe o id da chamada e id do homologado como parâmetros.                             |
     +---------------------------------------------------------------------------------------+
     """
-    print ('*** id: ',homologado_id)
-    print ('*** chamada_id: ',chamada_id)
-    homologado = Homologados.query.get_or_404(homologado_id)
-    print ('*****', homologado.id)
-    db.session.delete(homologado)
-    db.session.commit()
-
-    registra_log_auto(current_user.id,None,'bop')
+    services.excluir_homologado(homologado_id, current_user.id)
 
     flash ('Homologado deletado!','sucesso')
 

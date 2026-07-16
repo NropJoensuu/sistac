@@ -31,6 +31,7 @@ import re
 import datetime
 from datetime import datetime as dt
 import tempfile
+import locale
 
 import xlrd
 from werkzeug.utils import secure_filename
@@ -41,7 +42,7 @@ from sqlalchemy.sql import label
 from project import db, sched
 from project.models import (
     Sistema, Log_Auto, PagamentosPDCTR, RefCargaPDCTR, Bolsa,
-    Processo_Filho, Processo_Mae, MSG_Siconv,
+    Processo_Filho, Processo_Mae, MSG_Siconv, Chamadas, Homologados,
 )
 from project.demandas.views import registra_log_auto
 
@@ -521,3 +522,250 @@ def carregar_mensagens_siconv(caminho_arquivo):
 
 
 ###########################################################################################################
+
+
+# =============================================================================
+# Chamadas / Homologados
+# =============================================================================
+
+def criar_chamada(id_acordo_convenio, sei, chamada_nome, qtd_projetos,
+                   vl_total_chamada_str, doc_sei, obs, usuario_id):
+    """Registra uma nova chamada, associada a um acordo ou convênio."""
+    chamada = Chamadas(
+        sei=sei,
+        chamada=chamada_nome,
+        qtd_projetos=qtd_projetos,
+        vl_total_chamada=float(vl_total_chamada_str.replace('.', '').replace(',', '.')),
+        doc_sei=doc_sei,
+        obs=obs,
+        id_relaciona=str(id_acordo_convenio),
+        qtd_processos=0,
+    )
+
+    db.session.add(chamada)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'hom')
+
+    return chamada
+
+
+def buscar_chamada(id):
+    """Busca uma chamada pelo ID, ou levanta 404 se não existir."""
+    return Chamadas.query.get_or_404(id)
+
+
+def atualizar_chamada(id, sei, chamada_nome, qtd_projetos, vl_total_chamada_str,
+                       doc_sei, obs, usuario_id):
+    """Atualiza os dados de uma chamada existente."""
+    chamada = buscar_chamada(id)
+
+    chamada.sei = sei
+    chamada.chamada = chamada_nome
+    chamada.qtd_projetos = qtd_projetos
+    chamada.vl_total_chamada = float(vl_total_chamada_str.replace('.', '').replace(',', '.'))
+    chamada.doc_sei = doc_sei
+    chamada.obs = obs
+
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'hom')
+
+    return chamada
+
+
+def formata_chamada_para_edicao(chamada):
+    """Retorna os campos de uma chamada formatados para popular o form (GET)."""
+    return {
+        'sei': chamada.sei,
+        'chamada': chamada.chamada,
+        'qtd_projetos': chamada.qtd_projetos,
+        'vl_total_chamada': locale.currency(chamada.vl_total_chamada, symbol=False, grouping=True),
+        'doc_sei': chamada.doc_sei,
+        'obs': chamada.obs,
+    }
+
+
+def carregar_homologados(chamada_id, caminho_arquivo):
+    """
+    Lê a planilha de homologados (projetos ou bolsistas aprovados numa
+    chamada) e grava os registros novos na tabela Homologados,
+    atualizando nota/título/área/valor dos que já existirem (mesma
+    chamada + CPF + nome + prioridade).
+
+    Nota: assim como `cargaPDCTR`, usa `flash`/`redirect` diretamente
+    para o caso de a planilha não ter os campos esperados — mesma
+    exceção documentada no topo deste arquivo.
+    """
+    campos_homologados_para_db = ['Prioridade', 'Nota', 'CPF', 'Nome', 'Mod', 'Niv', 'Título', 'Área', 'Valor']
+
+    print('<<', dt.now().strftime("%x %X"), '>> ', ' Carga Homologados iniciada...')
+
+    book = xlrd.open_workbook(filename=caminho_arquivo, ragged_rows=True)
+    planilha = book.sheet_by_index(0)
+
+    linha_cabeçalho = planilha.row_values(0, start_colx=0, end_colx=None)
+
+    for campo in campos_homologados_para_db:
+        if campo not in linha_cabeçalho:
+            print('** ATENÇÃO: o campo ', campo, ' não existe na planinha original, verifique o parâmetro inserido. **')
+            flash('ERRO! O campo ' + str(campo) + ' não existe na planinha original, verifique o parâmetro inserido.', 'erro')
+            return redirect(url_for('core.inicio'))
+
+    qtd_linhas = planilha.nrows - 1
+
+    print('\n')
+    print('Planilha: Homologados')
+    print(f'Cabeçalho original: {len(linha_cabeçalho)} campos')
+    print(f'Cabeçalho após extração: {len(campos_homologados_para_db)} campos')
+    print(f'Quantidade de registros na planilha: {qtd_linhas}')
+    print('Começará a extração com o cabeçalho na linha ', 1)
+    print('\n')
+
+    print('<<', dt.now().strftime("%x %X"), '>> ', ' Gravando dados no banco...')
+    print('\n')
+
+    for i in range(qtd_linhas):
+
+        linha_base = planilha.row_values(i + 1, start_colx=0)
+
+        linha = []
+
+        for campo in campos_homologados_para_db:
+
+            dado_célula = planilha.cell_value(i + 1, linha_cabeçalho.index(campo))
+
+            if str(dado_célula) == '':
+                dado_célula = None
+
+            linha.append(dado_célula)
+
+        homologado_pre_existente = db.session.query(Homologados)\
+                                       .filter_by(chamada_id=chamada_id, cpf=linha[2], nome=linha[3], prioridade=linha[0])\
+                                       .first()
+
+        if homologado_pre_existente is None:
+
+            if linha[5] == '' or linha[5] is None:
+                linha[5] = '*'
+
+            homologado = Homologados(
+                chamada_id=chamada_id, prioridade=linha[0], nota=linha[1], cpf=linha[2],
+                nome=linha[3], mod=linha[4], niv=linha[5], titulo=linha[6],
+                area=linha[7], valor=linha[8],
+            )
+
+            db.session.add(homologado)
+
+        else:
+
+            if linha[1] is not None:
+                homologado_pre_existente.nota = linha[1]
+            if linha[6] is not None:
+                homologado_pre_existente.titulo = linha[6]
+            if linha[7] is not None:
+                homologado_pre_existente.area = linha[7]
+            if linha[8] is not None:
+                homologado_pre_existente.valor = linha[8]
+
+    db.session.commit()
+
+    print('<<', dt.now().strftime("%x %X"), '>> ', ' Dados dos homologados carregados.')
+
+    return None
+
+
+def buscar_chamada_e_homologados(chamada_id):
+    """Retorna a chamada e a lista de seus homologados, ordenada por prioridade/nota."""
+    chamada = db.session.query(Chamadas).filter(Chamadas.id == chamada_id).first()
+
+    homologados = db.session.query(Homologados)\
+                            .filter(Homologados.chamada_id == chamada_id)\
+                            .order_by(Homologados.prioridade, Homologados.nota.desc()).all()
+
+    return chamada, homologados
+
+
+def _parse_valor_opcional(valor_str):
+    """Converte string de valor monetário BR para float, ou None se vazio."""
+    if valor_str is not None and valor_str != '':
+        return float(valor_str.replace('.', '').replace(',', '.'))
+    return None
+
+
+def criar_homologado(chamada_id, prioridade, nota_str, cpf, nome, mod, niv, titulo, area, valor_str, usuario_id):
+    """Registra um novo projeto/bolsista homologado."""
+    homologado = Homologados(
+        chamada_id=chamada_id, prioridade=prioridade, nota=_parse_valor_opcional(nota_str),
+        cpf=cpf, nome=nome, mod=mod, niv=niv, titulo=titulo, area=area,
+        valor=_parse_valor_opcional(valor_str),
+    )
+
+    db.session.add(homologado)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'bop')
+
+    return homologado
+
+
+def atualizar_homologado(homologado_id, chamada_id, prioridade, nota_str, cpf, nome, mod, niv, titulo, area, valor_str, usuario_id):
+    """Atualiza os dados de um projeto/bolsista homologado existente."""
+    homologado = Homologados.query.get_or_404(homologado_id)
+
+    homologado.chamada_id = chamada_id
+    homologado.prioridade = prioridade
+    homologado.nota = _parse_valor_opcional(nota_str)
+    homologado.cpf = cpf
+    homologado.nome = nome
+    homologado.mod = mod
+    homologado.niv = niv
+    homologado.titulo = titulo
+    homologado.area = area
+    homologado.valor = _parse_valor_opcional(valor_str)
+
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'bop')
+
+    return homologado
+
+
+def buscar_homologado(homologado_id):
+    """Busca um homologado pelo ID (sem levantar 404 — mesmo comportamento original)."""
+    return db.session.query(Homologados).filter(Homologados.id == homologado_id).first()
+
+
+def formata_homologado_para_edicao(homologado):
+    """Retorna os campos de um homologado formatados para popular o form (GET)."""
+    if homologado.nota is not None and homologado.nota != '':
+        nota = str(homologado.nota).replace(',', '').replace('.', ',')
+    else:
+        nota = homologado.nota
+
+    if homologado.valor is not None and homologado.valor != '':
+        valor = locale.currency(homologado.valor, symbol=False, grouping=True)
+    else:
+        valor = homologado.valor
+
+    return {
+        'prioridade': homologado.prioridade,
+        'nota': nota,
+        'cpf': homologado.cpf,
+        'nome': homologado.nome,
+        'mod': homologado.mod,
+        'niv': homologado.niv,
+        'titulo': homologado.titulo,
+        'area': homologado.area,
+        'valor': valor,
+    }
+
+
+def excluir_homologado(homologado_id, usuario_id):
+    """Remove um registro da lista de homologados de uma chamada."""
+    homologado = Homologados.query.get_or_404(homologado_id)
+
+    db.session.delete(homologado)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'bop')
