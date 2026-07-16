@@ -16,14 +16,14 @@ from datetime import date
 from calendar import monthrange
 
 from fpdf import FPDF
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.sql import label
 
 from project import db, app
 from project.models import (
     Programa, Programa_Interesse, RefSICONV, Proposta, Convenio, DadosSEI,
     Coords, User, Empenho, Desembolso, Pagamento, Chamadas, Emp_Cap_Cus,
-    Crono_Desemb,
+    Crono_Desemb, Demanda, MSG_Siconv,
 )
 from project.demandas.views import registra_log_auto
 
@@ -662,3 +662,137 @@ def gerar_pdf_convenio(conv, dados):
     # Caminho portável (funciona em qualquer ambiente, não só no container Docker)
     pasta_pdf = os.path.join(app.root_path, 'static', 'convenio.pdf')
     pdf.output(pasta_pdf)
+
+# =============================================================================
+# Convênio (núcleo) — chamadas, natureza de despesa, demandas SEI, mensagens
+# =============================================================================
+
+def chamadas_disponiveis():
+    """Retorna as chamadas ainda não associadas a nenhum convênio, formatadas para um SelectField."""
+    chamadas = db.session.query(Chamadas.id, Chamadas.chamada)\
+                         .filter(or_(Chamadas.id_relaciona == None, Chamadas.id_relaciona == ''))\
+                         .order_by(Chamadas.chamada)\
+                         .all()
+
+    lista_chamadas = [
+        (str(c.id), c.chamada[:110] + '...') if len(c.chamada) > 110 else (str(c.id), c.chamada)
+        for c in chamadas
+    ]
+    lista_chamadas.insert(0, ('', ''))
+
+    return lista_chamadas
+
+
+def associar_chamadas(conv, chamada_ids):
+    """Associa uma ou mais chamadas a um convênio."""
+    for c in chamada_ids:
+        chamada = Chamadas.query.get_or_404(int(c))
+        chamada.id_relaciona = 'C' + conv
+        db.session.commit()
+
+
+def desassociar_chamada(chamada_id):
+    """Remove a associação de uma chamada com qualquer convênio."""
+    chamada = Chamadas.query.get_or_404(chamada_id)
+    chamada.id_relaciona = ''
+    db.session.commit()
+
+
+def buscar_nd(id):
+    """Busca o registro de natureza de despesa (ND) de um empenho, se existir."""
+    return Emp_Cap_Cus.query.get(id)
+
+
+def salvar_nd(id, nd_registro, nd_valor, usuario_id):
+    """Cria ou atualiza a natureza de despesa (ND) de um empenho."""
+    if nd_registro is not None:
+        nd_registro.nd = nd_valor
+    else:
+        nd_registro = Emp_Cap_Cus(id_empenho=id, nd=nd_valor)
+        db.session.add(nd_registro)
+
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'and')
+
+
+def buscar_numero_empenho(id):
+    """Busca o número do empenho a partir do seu ID."""
+    return db.session.query(Empenho.NR_EMPENHO).filter(Empenho.ID_EMPENHO == id).first()
+
+
+def demandas_do_convenio(conv):
+    """
+    Retorna os dados necessários para exibir as demandas relacionadas
+    a um convênio: contagem, lista de demandas, SEI e autores.
+    """
+    programa_siconv = db.session.query(
+        Proposta.ID_PROPOSTA, Proposta.ID_PROGRAMA, Proposta.UF_PROPONENTE,
+        Programa.COD_PROGRAMA, Programa_Interesse.sigla, Programa.ANO_DISPONIBILIZACAO
+    ).join(Programa, Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
+     .outerjoin(Programa_Interesse, Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
+     .subquery()
+
+    conv_SEI = db.session.query(DadosSEI.sei, programa_siconv.c.sigla, DadosSEI.nr_convenio)\
+                         .filter_by(nr_convenio=conv)\
+                         .join(Convenio, DadosSEI.nr_convenio == Convenio.NR_CONVENIO)\
+                         .join(programa_siconv, programa_siconv.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
+                         .first()
+
+    if conv_SEI is not None:
+        SEI = conv_SEI.sei
+        SEI_s = str(SEI).split('/')[0] + '_' + str(SEI).split('/')[1]
+        conv_SEI_programa = conv_SEI.sigla
+        conv_SEI_nr_convenio = conv_SEI.nr_convenio
+        conv_SEI_ano = 0
+    else:
+        SEI = "?"
+        SEI_s = "?"
+        conv_SEI_programa = "?"
+        conv_SEI_nr_convenio = 0
+        conv_SEI_ano = 0
+
+    demandas_count = Demanda.query.filter(Demanda.convênio == conv).count()
+
+    demandas = Demanda.query.filter(Demanda.convênio == conv)\
+                            .order_by(Demanda.data.desc()).all()
+
+    autores = []
+    for demanda in demandas:
+        autores.append(str(User.query.filter_by(id=demanda.user_id).first()).split(';')[0])
+
+    dados = [conv_SEI_programa, SEI_s, conv_SEI_nr_convenio, conv_SEI_ano]
+
+    return {
+        'demandas_count': demandas_count,
+        'demandas': demandas,
+        'sei': SEI,
+        'autores': autores,
+        'dados': dados,
+    }
+
+
+def mensagens_siconv():
+    """
+    Retorna as mensagens do SICONV previamente carregadas, junto com a
+    data de referência da carga (ou None, se não houver mensagens).
+    """
+    programa_siconv = db.session.query(
+        Proposta.ID_PROPOSTA, Proposta.ID_PROGRAMA, Proposta.UF_PROPONENTE,
+        Programa.COD_PROGRAMA, Programa_Interesse.sigla, Programa.ANO_DISPONIBILIZACAO
+    ).join(Programa, Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
+     .outerjoin(Programa_Interesse, Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
+     .subquery()
+
+    msgs = db.session.query(
+        MSG_Siconv.data_ref, MSG_Siconv.nr_convenio, MSG_Siconv.desc,
+        programa_siconv.c.sigla, DadosSEI.epe, programa_siconv.c.UF_PROPONENTE,
+        DadosSEI.sei, Convenio.SIT_CONVENIO, MSG_Siconv.sit
+    ).join(DadosSEI, MSG_Siconv.nr_convenio == DadosSEI.nr_convenio)\
+     .join(Convenio, MSG_Siconv.nr_convenio == Convenio.NR_CONVENIO)\
+     .join(programa_siconv, programa_siconv.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
+     .order_by(programa_siconv.c.sigla, MSG_Siconv.desc).all()
+
+    data_ref = msgs[0].data_ref if msgs else None
+
+    return msgs, data_ref

@@ -9,7 +9,7 @@
       </div>
       <div class="col">
         <p align="right"><span class="text-secondary">Dados de </span>
-          <span class="badge badge-pill badge-info">{{data_ref.strftime('%x')}}</span></p>
+          <span class="badge badge-pill badge-info">{{data_ref.strftime('%x') if data_ref else 'Nenhuma mensagem carregada'}}</span></p>
       </div>
   </div>
 </caption>

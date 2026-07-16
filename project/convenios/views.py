@@ -242,24 +242,12 @@ def associa_chamada(conv):
     +---------------------------------------------------------------------------------------+
     """
 
-    chamadas = db.session.query(Chamadas.id,Chamadas.chamada)\
-                         .filter(or_(Chamadas.id_relaciona == None, Chamadas.id_relaciona == ''))\
-                         .order_by(Chamadas.chamada)\
-                         .all()
-
-    lista_chamadas = [(str(c.id),c.chamada[:110]+'...') if len(c.chamada) >110 else (str(c.id),c.chamada) for c in chamadas]
-    lista_chamadas.insert(0,('',''))
-
     form = ChamadaConvForm()
-
-    form.chamada.choices= lista_chamadas
+    form.chamada.choices = services.chamadas_disponiveis()
 
     if form.validate_on_submit():
 
-        for c in form.chamada.data:
-            chamada = Chamadas.query.get_or_404(int(c))
-            chamada.id_relaciona = 'C'+conv
-            db.session.commit()
+        services.associar_chamadas(conv, form.chamada.data)
 
         flash('Chamada(s) associada(s) ao Convênio!','sucesso')
 
@@ -281,11 +269,7 @@ def desassocia_chamada(id,conv):
     +---------------------------------------------------------------------------------------+
     """
 
-    chamada = Chamadas.query.get_or_404(id)
-
-    chamada.id_relaciona = ''
-    
-    db.session.commit()
+    services.desassociar_chamada(id)
 
     flash('Chamada desassociada do Convênio!','sucesso')
 
@@ -305,22 +289,13 @@ def update_nd(id,conv):
     +---------------------------------------------------------------------------------------+
     """
 
-    nd = Emp_Cap_Cus.query.get(id)
+    nd = services.buscar_nd(id)
 
     form = NDForm()
 
     if form.validate_on_submit():
 
-        if nd != None:
-            nd.nd = form.nd.data
-        else:
-            nd = Emp_Cap_Cus(id_empenho = id,
-                             nd         = form.nd.data)
-            db.session.add(nd)
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'and')
+        services.salvar_nd(id, nd, form.nd.data, current_user.id)
 
         flash('ND atualizada!','sucesso')
 
@@ -332,7 +307,7 @@ def update_nd(id,conv):
         if nd != None:
             form.nd.data = nd.nd
 
-    emp = db.session.query(Empenho.NR_EMPENHO).filter(Empenho.ID_EMPENHO == id).first()
+    emp = services.buscar_numero_empenho(id)
 
     return render_template('add_nd.html', form=form, emp=emp)
 
@@ -347,56 +322,12 @@ def SEI_demandas (conv):
        +--------------------------------------------------------------------------------------+
     """
 
-    programa_siconv = db.session.query(Proposta.ID_PROPOSTA,
-                                       Proposta.ID_PROGRAMA,
-                                       Proposta.UF_PROPONENTE,
-                                       Programa.COD_PROGRAMA,
-                                       Programa_Interesse.sigla,
-                                       Programa.ANO_DISPONIBILIZACAO)\
-                                .join(Programa,Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
-                                .outerjoin(Programa_Interesse,Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
-                                .subquery()
+    dados = services.demandas_do_convenio(conv)
 
-    conv_SEI = db.session.query(DadosSEI.sei,
-                                programa_siconv.c.sigla,
-                                DadosSEI.nr_convenio)\
-                         .filter_by(nr_convenio=conv)\
-                         .join(Convenio,DadosSEI.nr_convenio == Convenio.NR_CONVENIO)\
-                         .join(programa_siconv, programa_siconv.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
-                         .first()
-
-    if conv_SEI != None:
-        SEI = conv_SEI.sei
-        SEI_s = str(SEI).split('/')[0]+'_'+str(SEI).split('/')[1]
-        conv_SEI_programa = conv_SEI.sigla
-        conv_SEI_nr_convenio = conv_SEI.nr_convenio
-        conv_SEI_ano = 0
-    else:
-        SEI = "?"
-        SEI_s = "?"
-        conv_SEI_programa = "?"
-        conv_SEI_nr_convenio = 0
-        conv_SEI_ano = 0
-
-    #demandas_count = Demanda.query.filter(Demanda.sei.like('%'+SEI+'%')).count()
-    demandas_count = Demanda.query.filter(Demanda.convênio == conv).count()
-
-    #demandas = Demanda.query.filter(Demanda.sei.like('%'+SEI+'%'))\
-    #                        .order_by(Demanda.data.desc()).all()
-    demandas = Demanda.query.filter(Demanda.convênio == conv)\
-                            .order_by(Demanda.data.desc()).all()
+    return render_template('SEI_demandas.html', **dados)
 
 
-    autores=[]
-    for demanda in demandas:
-        autores.append(str(User.query.filter_by(id=demanda.user_id).first()).split(';')[0])
-
-    dados = [conv_SEI_programa,SEI_s,conv_SEI_nr_convenio,conv_SEI_ano]
-
-    return render_template('SEI_demandas.html',demandas_count=demandas_count,demandas=demandas,sei=SEI, autores=autores,dados=dados)
-
-
-# lista das demandas relacionadas a um convênio
+# lista as mensagens SICONV carregadas
 
 @convenios.route('/msg_siconv')
 def msg_siconv ():
@@ -406,31 +337,7 @@ def msg_siconv ():
        +--------------------------------------------------------------------------------------+
     """
 
-    programa_siconv = db.session.query(Proposta.ID_PROPOSTA,
-                                       Proposta.ID_PROGRAMA,
-                                       Proposta.UF_PROPONENTE,
-                                       Programa.COD_PROGRAMA,
-                                       Programa_Interesse.sigla,
-                                       Programa.ANO_DISPONIBILIZACAO)\
-                                .join(Programa,Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
-                                .outerjoin(Programa_Interesse,Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)\
-                                .subquery()
-
-    msgs = db.session.query(MSG_Siconv.data_ref,
-                            MSG_Siconv.nr_convenio,
-                            MSG_Siconv.desc,
-                            programa_siconv.c.sigla,
-                            DadosSEI.epe,
-                            programa_siconv.c.UF_PROPONENTE,
-                            DadosSEI.sei,
-                            Convenio.SIT_CONVENIO,
-                            MSG_Siconv.sit)\
-                            .join(DadosSEI,MSG_Siconv.nr_convenio == DadosSEI.nr_convenio)\
-                            .join(Convenio,MSG_Siconv.nr_convenio == Convenio.NR_CONVENIO)\
-                            .join(programa_siconv, programa_siconv.c.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
-                            .order_by(programa_siconv.c.sigla,MSG_Siconv.desc).all()
-
-    data_ref = msgs[0].data_ref
+    msgs, data_ref = services.mensagens_siconv()
 
     return render_template('MSG_Siconv.html',msgs=msgs,data_ref=data_ref)
 
