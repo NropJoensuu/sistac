@@ -1208,36 +1208,18 @@ def cria_programa_cnpq():
     +---------------------------------------------------------------------------------------+
     """
 
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    lista_coords = [(c,c) for c in l_unid]
-    lista_coords.insert(0,('',''))
-
     form = Programa_CNPqForm()
-    form.coord.choices = lista_coords
+    form.coord.choices = services.coords_choices_para_programa(current_user.coord)
 
     if form.validate_on_submit():
 
-        # last_programa_cnpq = db.session.query(Programa_CNPq).order_by(Programa_CNPq.ID_PROGRAMA.desc()).first()
-
-        programa_cnpq = Programa_CNPq(COD_PROGRAMA   = form.cod_programa.data,
-                                      NOME_PROGRAMA  = form.nome_programa.data,
-                                      SIGLA_PROGRAMA = form.sigla_programa.data,
-                                      COORD          = form.coord.data)
-
-        db.session.add(programa_cnpq)
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'pac')
+        services.criar_programa_cnpq(
+            cod_programa=form.cod_programa.data,
+            nome_programa=form.nome_programa.data,
+            sigla_programa=form.sigla_programa.data,
+            coord=form.coord.data,
+            usuario_id=current_user.id,
+        )
 
         flash('Programa do CNPq registrado!','sucesso')
         return redirect(url_for('acordos.lista_programa_cnpq'))
@@ -1249,6 +1231,7 @@ def cria_programa_cnpq():
 ### LISTAR programas do CNPq
 
 @acordos.route("/lista_programa_cnpq")
+@login_required
 def lista_programa_cnpq():
     """
     +---------------------------------------------------------------------------------------+
@@ -1256,24 +1239,9 @@ def lista_programa_cnpq():
     +---------------------------------------------------------------------------------------+
     """
 
-    unidade = current_user.coord
+    programas = services.listar_programas_cnpq(current_user.coord)
 
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    programas = db.session.query(Programa_CNPq)\
-                          .filter(Programa_CNPq.COORD.in_(l_unid))\
-                          .all()
-    
-    quantidade = len(programas)
-
-    return render_template('lista_programa_cnpq.html',programas=programas, quantidade=quantidade)
+    return render_template('lista_programa_cnpq.html', programas=programas, quantidade=len(programas))
 
 
 # lista programas de um acordo
@@ -1288,22 +1256,14 @@ def lista_programas_acordo(id_acordo):
     +---------------------------------------------------------------------------------------+
     """
 
-    lista_programas = db.session.query(grupo_programa_cnpq.id_acordo,
-                                       Programa_CNPq.COD_PROGRAMA,
-                                       Programa_CNPq.SIGLA_PROGRAMA,
-                                       Programa_CNPq.NOME_PROGRAMA)\
-                                .join(Programa_CNPq, Programa_CNPq.ID_PROGRAMA == grupo_programa_cnpq.id_programa)\
-                                .filter(grupo_programa_cnpq.id_acordo == id_acordo)\
-                                .order_by(Programa_CNPq.SIGLA_PROGRAMA)\
-                                .all()
-    qtd_progs = len(lista_programas)
+    lista_programas, nome_acordo = services.programas_do_acordo(id_acordo)
 
-    # pega nome do acordo
-    acordo = db.session.query(Acordo.nome).filter(Acordo.id == id_acordo).first()                            
+    if nome_acordo is None:
+        abort(404)
 
     return render_template ('lista_programas_acordo.html',lista_programas=lista_programas,
-                                                          qtd_progs=qtd_progs,
-                                                          nome = acordo.nome,
+                                                          qtd_progs=len(lista_programas),
+                                                          nome = nome_acordo,
                                                           id_acordo=id_acordo)                            
 
 #
@@ -1320,43 +1280,21 @@ def atualiza_programa_cnpq(id):
     +---------------------------------------------------------------------------------------+
     """
 
-    programa_cnpq = Programa_CNPq.query.get_or_404(id)
-
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    lista_coords = [(c,c) for c in l_unid]
-    lista_coords.insert(0,('',''))
+    programa_cnpq = services.buscar_programa_cnpq(id)
 
     form = Programa_CNPqForm()
-    form.coord.choices = lista_coords
+    form.coord.choices = services.coords_choices_para_programa(current_user.coord)
 
     if form.validate_on_submit():
 
-        # atualiza acordos caso o cod. do program seja alterado
-        if form.cod_programa.data != programa_cnpq.COD_PROGRAMA:
-            acordos = db.session.query(Acordo).filter(Acordo.programa_cnpq==programa_cnpq.COD_PROGRAMA).all()
-            if acordos:
-                for a in acordos:
-                    a.programa_cnpq = form.cod_programa.data
-                db.session.commit()    
-
-        programa_cnpq.COD_PROGRAMA   = form.cod_programa.data
-        programa_cnpq.NOME_PROGRAMA  = form.nome_programa.data
-        programa_cnpq.SIGLA_PROGRAMA = form.sigla_programa.data
-        programa_cnpq.COORD          = form.coord.data
-
-        db.session.commit()
-               
-        registra_log_auto(current_user.id,None,'pac')
+        services.atualizar_programa_cnpq(
+            id=id,
+            cod_programa=form.cod_programa.data,
+            nome_programa=form.nome_programa.data,
+            sigla_programa=form.sigla_programa.data,
+            coord=form.coord.data,
+            usuario_id=current_user.id,
+        )
 
         flash('Programa do CNPq atualizado!','sucesso')
         return redirect(url_for('acordos.lista_programa_cnpq'))
@@ -1372,6 +1310,7 @@ def atualiza_programa_cnpq(id):
     return render_template('cria_programa_cnpq.html', title='Update', form=form)
 
 #
+### LISTAR processos mãe de um acordo
 ### LISTAR processos mãe de um acordo
 
 @acordos.route("/<int:acordo_id>/lista_processos_mae_por_acordo")
@@ -1898,47 +1837,7 @@ def edic_programa(cod_programa,sigla):
     +---------------------------------------------------------------------------------------+
     """
 
-    chamadas = db.session.query(Acordo.nome,
-                                label('pago_chamada',func.sum(chamadas_cnpq.valor)))\
-                         .join(chamadas_cnpq_acordos, chamadas_cnpq_acordos.acordo_id == Acordo.id)\
-                         .join(chamadas_cnpq, chamadas_cnpq.id == chamadas_cnpq_acordos.chamada_cnpq_id)\
-                         .group_by(Acordo.nome)\
-                         .subquery()
-
-    maes_filhos   = db.session.query(Acordo.nome,
-                                     label('qtd_maes',func.count(distinct(Processo_Filho.proc_mae))),
-                                     label('qtd_filhos',func.count(distinct(Processo_Filho.processo))),
-                                     label('qtd_cpfs',func.count(distinct(Processo_Filho.cpf))),
-                                     label('pago_bolsas',func.sum(Processo_Filho.pago_total)))\
-                               .join(Acordo_ProcMae, Acordo_ProcMae.acordo_id == Acordo.id)\
-                               .join(Processo_Mae, Processo_Mae.id == Acordo_ProcMae.proc_mae_id)\
-                               .join(Processo_Filho, Processo_Filho.proc_mae == Processo_Mae.proc_mae)\
-                               .group_by(Acordo.nome)\
-                               .subquery()                     
-
-    edics = db.session.query(Acordo.nome,
-                             label('vl_cnpq',func.sum(Acordo.valor_cnpq)),
-                             label('vl_epe',func.sum(Acordo.valor_epe)),
-                             label('qtd',func.count(Acordo.id)),
-                             label('qtd_edic',func.count(distinct(Acordo.nome))),
-                             maes_filhos.c.qtd_maes,
-                             maes_filhos.c.qtd_filhos,
-                             maes_filhos.c.qtd_cpfs,
-                             maes_filhos.c.pago_bolsas,
-                             chamadas.c.pago_chamada)\
-                      .join(grupo_programa_cnpq,grupo_programa_cnpq.id_acordo == Acordo.id)\
-                      .join(Programa_CNPq, Programa_CNPq.ID_PROGRAMA == grupo_programa_cnpq.id_programa)\
-                      .outerjoin(maes_filhos, maes_filhos.c.nome == Acordo.nome)\
-                      .outerjoin(chamadas, chamadas.c.nome == Acordo.nome)\
-                      .filter(Programa_CNPq.COD_PROGRAMA == cod_programa)\
-                      .group_by(Acordo.nome,
-                                maes_filhos.c.qtd_maes,
-                                maes_filhos.c.qtd_filhos,
-                                maes_filhos.c.qtd_cpfs,
-                                maes_filhos.c.pago_bolsas,
-                                chamadas.c.pago_chamada)\
-                      .order_by(Acordo.nome)\
-                      .all()
+    edics = services.resumo_edicoes_programa(cod_programa)
 
     return render_template('edic_programa.html',edics=edics,sigla=sigla)
 

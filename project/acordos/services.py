@@ -1,11 +1,10 @@
 """
-.. topic:: Acordos (services) — Chamadas do acordo
+.. topic:: Acordos (services) — Chamadas do acordo / Programas CNPq
 
-    Camada de regra de negócio do grupo "Chamadas do acordo" do módulo
-    de acordos: associação/desassociação de chamadas do CNPq e de
-    programas a um acordo, e as listagens relacionadas. Sem
-    dependência de objetos de request/response do Flask (redirect,
-    flash) — as rotas (views.py) decidem o que fazer com o resultado.
+    Camada de regra de negócio dos grupos "Chamadas do acordo" e
+    "Programas CNPq" do módulo de acordos. Sem dependência de objetos
+    de request/response do Flask (redirect, flash) — as rotas
+    (views.py) decidem o que fazer com o resultado.
 """
 
 from sqlalchemy import func, distinct
@@ -16,6 +15,7 @@ from project.models import (
     Acordo, Acordo_ProcMae, Processo_Mae, Processo_Filho, Coords,
     Programa_CNPq, grupo_programa_cnpq, chamadas_cnpq, chamadas_cnpq_acordos,
 )
+from project.demandas.views import registra_log_auto
 
 
 def acordo_id_por_proc_mae(proc_mae_id):
@@ -223,3 +223,139 @@ def desassociar_chamada_do_acordo(id_chamada, id_acordo):
              .delete()
 
     db.session.commit()
+
+
+# =============================================================================
+# Programas CNPq
+# =============================================================================
+
+def coords_choices_para_programa(unidade):
+    """Retorna a lista de coordenações (unidade + filhas) formatada para um SelectField."""
+    l_unid = _unidades_hierarquia(unidade)
+    lista_coords = [(c, c) for c in l_unid]
+    lista_coords.insert(0, ('', ''))
+    return lista_coords
+
+
+def criar_programa_cnpq(cod_programa, nome_programa, sigla_programa, coord, usuario_id):
+    """Registra um novo programa do CNPq."""
+    programa_cnpq = Programa_CNPq(
+        COD_PROGRAMA=cod_programa, NOME_PROGRAMA=nome_programa,
+        SIGLA_PROGRAMA=sigla_programa, COORD=coord,
+    )
+
+    db.session.add(programa_cnpq)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'pac')
+
+    return programa_cnpq
+
+
+def listar_programas_cnpq(unidade):
+    """Lista os programas do CNPq vinculados à unidade do usuário (e suas filhas, se houver)."""
+    l_unid = _unidades_hierarquia(unidade)
+
+    return db.session.query(Programa_CNPq)\
+                     .filter(Programa_CNPq.COORD.in_(l_unid))\
+                     .all()
+
+
+def programas_do_acordo(id_acordo):
+    """
+    Retorna os programas usados por um acordo para efetuar pagamentos,
+    junto com o nome do acordo. Retorna nome_acordo=None se o acordo
+    não existir (corrige bug real: o código original acessava
+    `.nome` sem checar se a consulta retornou algo).
+    """
+    lista_programas = db.session.query(grupo_programa_cnpq.id_acordo,
+                                       Programa_CNPq.COD_PROGRAMA,
+                                       Programa_CNPq.SIGLA_PROGRAMA,
+                                       Programa_CNPq.NOME_PROGRAMA)\
+                                .join(Programa_CNPq, Programa_CNPq.ID_PROGRAMA == grupo_programa_cnpq.id_programa)\
+                                .filter(grupo_programa_cnpq.id_acordo == id_acordo)\
+                                .order_by(Programa_CNPq.SIGLA_PROGRAMA)\
+                                .all()
+
+    acordo = db.session.query(Acordo.nome).filter(Acordo.id == id_acordo).first()
+
+    return lista_programas, (acordo.nome if acordo else None)
+
+
+def buscar_programa_cnpq(id):
+    """Busca um programa do CNPq pelo ID, ou levanta 404 se não existir."""
+    return Programa_CNPq.query.get_or_404(id)
+
+
+def atualizar_programa_cnpq(id, cod_programa, nome_programa, sigla_programa, coord, usuario_id):
+    """
+    Atualiza os dados de um programa do CNPq. Se o código do programa
+    mudar, propaga a mudança para todos os acordos que o usam.
+    """
+    programa_cnpq = buscar_programa_cnpq(id)
+
+    if cod_programa != programa_cnpq.COD_PROGRAMA:
+        acordos_afetados = db.session.query(Acordo).filter(Acordo.programa_cnpq == programa_cnpq.COD_PROGRAMA).all()
+        if acordos_afetados:
+            for a in acordos_afetados:
+                a.programa_cnpq = cod_programa
+            db.session.commit()
+
+    programa_cnpq.COD_PROGRAMA = cod_programa
+    programa_cnpq.NOME_PROGRAMA = nome_programa
+    programa_cnpq.SIGLA_PROGRAMA = sigla_programa
+    programa_cnpq.COORD = coord
+
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'pac')
+
+    return programa_cnpq
+
+
+def resumo_edicoes_programa(cod_programa):
+    """
+    Retorna o resumo de edições (acordos) de um programa do CNPq:
+    valores, quantidade de mães/filhos/CPFs e valores pagos agregados.
+    """
+    chamadas = db.session.query(Acordo.nome,
+                                label('pago_chamada', func.sum(chamadas_cnpq.valor)))\
+                         .join(chamadas_cnpq_acordos, chamadas_cnpq_acordos.acordo_id == Acordo.id)\
+                         .join(chamadas_cnpq, chamadas_cnpq.id == chamadas_cnpq_acordos.chamada_cnpq_id)\
+                         .group_by(Acordo.nome)\
+                         .subquery()
+
+    maes_filhos = db.session.query(Acordo.nome,
+                                   label('qtd_maes', func.count(distinct(Processo_Filho.proc_mae))),
+                                   label('qtd_filhos', func.count(distinct(Processo_Filho.processo))),
+                                   label('qtd_cpfs', func.count(distinct(Processo_Filho.cpf))),
+                                   label('pago_bolsas', func.sum(Processo_Filho.pago_total)))\
+                             .join(Acordo_ProcMae, Acordo_ProcMae.acordo_id == Acordo.id)\
+                             .join(Processo_Mae, Processo_Mae.id == Acordo_ProcMae.proc_mae_id)\
+                             .join(Processo_Filho, Processo_Filho.proc_mae == Processo_Mae.proc_mae)\
+                             .group_by(Acordo.nome)\
+                             .subquery()
+
+    return db.session.query(Acordo.nome,
+                            label('vl_cnpq', func.sum(Acordo.valor_cnpq)),
+                            label('vl_epe', func.sum(Acordo.valor_epe)),
+                            label('qtd', func.count(Acordo.id)),
+                            label('qtd_edic', func.count(distinct(Acordo.nome))),
+                            maes_filhos.c.qtd_maes,
+                            maes_filhos.c.qtd_filhos,
+                            maes_filhos.c.qtd_cpfs,
+                            maes_filhos.c.pago_bolsas,
+                            chamadas.c.pago_chamada)\
+                     .join(grupo_programa_cnpq, grupo_programa_cnpq.id_acordo == Acordo.id)\
+                     .join(Programa_CNPq, Programa_CNPq.ID_PROGRAMA == grupo_programa_cnpq.id_programa)\
+                     .outerjoin(maes_filhos, maes_filhos.c.nome == Acordo.nome)\
+                     .outerjoin(chamadas, chamadas.c.nome == Acordo.nome)\
+                     .filter(Programa_CNPq.COD_PROGRAMA == cod_programa)\
+                     .group_by(Acordo.nome,
+                               maes_filhos.c.qtd_maes,
+                               maes_filhos.c.qtd_filhos,
+                               maes_filhos.c.qtd_cpfs,
+                               maes_filhos.c.pago_bolsas,
+                               chamadas.c.pago_chamada)\
+                     .order_by(Acordo.nome)\
+                     .all()
