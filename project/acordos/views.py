@@ -1500,6 +1500,7 @@ def lista_bolsistas_acordo(acordo_id):
 ## RESUMO acordos
 
 @acordos.route('/resumo_acordos')
+@login_required
 def resumo_acordos():
     """
     +---------------------------------------------------------------------------------------+
@@ -1508,57 +1509,10 @@ def resumo_acordos():
     +---------------------------------------------------------------------------------------+
     """
 
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    maes_filhos   = db.session.query(Processo_Filho.cod_programa,
-                                     label('qtd_maes',func.count(distinct(Processo_Filho.proc_mae))),
-                                     label('qtd_filhos',func.count(distinct(Processo_Filho.processo))),
-                                     label('qtd_cpfs',func.count(distinct(Processo_Filho.cpf))),
-                                     label('pago_bolsas',func.sum(Processo_Filho.pago_total)))\
-                               .group_by(Processo_Filho.cod_programa)\
-                               .subquery()
-
-    chamadas = db.session.query(chamadas_cnpq.cod_programa,
-                                label('pago_chamada',func.sum(chamadas_cnpq.valor)))\
-                         .group_by(chamadas_cnpq.cod_programa)\
-                         .subquery()                        
-    
-    programas = db.session.query(Programa_CNPq.COD_PROGRAMA,
-                                 Programa_CNPq.SIGLA_PROGRAMA,
-                                 label('vl_cnpq',func.sum(Acordo.valor_cnpq)),
-                                 label('vl_epe',func.sum(Acordo.valor_epe)),
-                                 label('qtd',func.count(Acordo.id)),
-                                 label('qtd_edic',func.count(distinct(Acordo.nome))),
-                                 maes_filhos.c.qtd_maes,
-                                 maes_filhos.c.qtd_filhos,
-                                 maes_filhos.c.qtd_cpfs,
-                                 maes_filhos.c.pago_bolsas,
-                                 chamadas.c.pago_chamada)\
-                           .join(grupo_programa_cnpq, grupo_programa_cnpq.id_programa == Programa_CNPq.ID_PROGRAMA)\
-                           .join(Acordo,Acordo.id == grupo_programa_cnpq.id_acordo)\
-                           .outerjoin(maes_filhos, maes_filhos.c.cod_programa == Programa_CNPq.COD_PROGRAMA)\
-                           .outerjoin(chamadas, chamadas.c.cod_programa == Programa_CNPq.COD_PROGRAMA)\
-                           .filter(Programa_CNPq.COORD.in_(l_unid))\
-                           .group_by(Programa_CNPq.SIGLA_PROGRAMA,
-                                     Programa_CNPq.COD_PROGRAMA,
-                                     maes_filhos.c.qtd_maes,
-                                     maes_filhos.c.qtd_filhos,
-                                     maes_filhos.c.qtd_cpfs,
-                                     maes_filhos.c.pago_bolsas,
-                                     chamadas.c.pago_chamada)\
-                           .all()
+    programas = services.resumo_acordos_por_programa(current_user.coord)
 
     return render_template('resumo_acordos.html',programas=programas,
-                                                 unidade=unidade)
+                                                 unidade=current_user.coord)
 
 #
 ## RESUMO por nomes dos acordos
@@ -1588,93 +1542,15 @@ def brasil_acordos():
     +---------------------------------------------------------------------------------------+
     """
 
-    hoje = dt.today()
+    mapa_html = services.gerar_mapa_brasil_acordos()
 
-    gps = {'AC':[-9.977916,-67.826068],
-           'AL':[-9.649433,-35.709335],
-           'AM':[-3.074759,-60.028723],
-           'AP':[0.052334,-51.070093],
-           'BA':[-13.008304,-38.512027],
-           'CE':[-3.795849,-38.497930],
-           'DF':[-15.710702,-47.911077],
-           'ES':[-20.276832,-40.300442],
-           'GO':[-16.680903,-49.250701],
-           'MA':[-2.501711,-44.284316],
-           'MG':[-19.884511,-43.915749],
-           'MS':[-20.447545,-54.603542],
-           'MT':[-15.566057,-56.072258],
-           'PA':[-1.454934,-48.475778],
-           'PB':[-7.205724,-35.921335],
-           'PE':[-8.060426,-34.901544],
-           'PI':[-5.096300,-42.798928],
-           'PR':[-25.446918,-49.245448],
-           'RJ':[-22.904571,-43.173827],
-           'RN':[-5.829595,-35.212017],
-           'RO':[-8.625350,-63.844920],
-           'RR':[2.930872,-60.672953],
-           'RS':[-30.028724,-51.228277],
-           'SC':[-27.571250,-48.509038],
-           'SE':[-10.909057,-37.050032],
-           'SP':[-23.536390,-46.714247],
-           'TO':[-10.182099,-48.331027]}
-
-    programas = db.session.query(Programa_CNPq.SIGLA_PROGRAMA,
-                                 Programa_CNPq.COD_PROGRAMA,
-                                 Programa_CNPq.COORD,
-                                 Programa_CNPq.ID_PROGRAMA,
-                                 Acordo.uf,
-                                 Acordo.epe,
-                                 label('qtd_acordos',func.count(Acordo.id)))\
-                          .join(grupo_programa_cnpq, grupo_programa_cnpq.id_programa == Programa_CNPq.ID_PROGRAMA)\
-                          .join(Acordo, Acordo.id ==  grupo_programa_cnpq.id_acordo)\
-                          .filter(Acordo.data_fim >= hoje)\
-                          .order_by(Programa_CNPq.SIGLA_PROGRAMA)\
-                          .group_by(Acordo.uf,
-                                    Programa_CNPq.SIGLA_PROGRAMA,
-                                    Programa_CNPq.COD_PROGRAMA,
-                                    Programa_CNPq.COORD,
-                                    Programa_CNPq.ID_PROGRAMA,
-                                    Acordo.epe)\
-                          .all()
-
-    m = Map(location=[-15.7, -47.9],
-            tiles='OpenStreetMap',
-            control_scale = True,
-            zoom_start = 2,
-            min_zoom=2)
-
-    m.fit_bounds([[-34,-74],[3,-34]])
-
-    for uf in gps:
-        qtd_na_uf = 0
-        cor = 'blue'
-        pop = '<b>Acordos - '+uf+':</b><br>'
-        for p in programas:
-            if p.uf == uf:
-                qtd_na_uf += p.qtd_acordos
-                tip = '<b>'+uf+'</b><br>'+str(qtd_na_uf)+' acordos vigentes'
-                pop += '<p>'+p.SIGLA_PROGRAMA+' ('+str(p.qtd_acordos)+')</p>'
-        if pop == '<b>Acordos - '+uf+':</b><br>':
-            tip = '<b>'+uf+'</b>'
-            pop = 'N&atilde;o h&aacute; Acordos celebrados com <b>'+uf+'</b>.'
-
-        #Circulos com raios em metros
-        Circle(location = [float(gps[uf][0]), float(gps[uf][1])],
-               radius = 18000 + qtd_na_uf*8000,
-               tooltip = tip,
-               popup = Popup(pop,max_width=150),
-               fill = True,
-               fill_opacity = 0.2,
-               weight = 1,
-               color=cor).add_to(m)
-
-
-    return render_template('brasil_convenios.html', m = m._repr_html_())
+    return render_template('brasil_convenios.html', m = mapa_html)
 
 
 ## acordos no quadro por uf
 
 @acordos.route('/quadro_acordos')
+@login_required
 def quadro_acordos():
     """
     +---------------------------------------------------------------------------------------+
@@ -1682,67 +1558,10 @@ def quadro_acordos():
     +---------------------------------------------------------------------------------------+
     """
 
-    unidade = current_user.coord
+    dados = services.quadro_acordos_por_uf(current_user.coord)
 
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    acordos = db.session.query(Acordo.uf,
-                               Programa_CNPq.SIGLA_PROGRAMA,
-                               label('qtd',func.count(Acordo.id)),
-                               label('valor_global',func.sum(Acordo.valor_cnpq+Acordo.valor_epe)),
-                               Programa_CNPq.COD_PROGRAMA)\
-                        .filter(Programa_CNPq.COORD.in_(l_unid),
-                                or_(Acordo.situ=='Vigente-Z',Acordo.situ=='Vigente-Esquecido'))\
-                        .join(grupo_programa_cnpq, grupo_programa_cnpq.id_acordo==Acordo.id)\
-                        .join(Programa_CNPq, Programa_CNPq.ID_PROGRAMA == grupo_programa_cnpq.id_programa)\
-                        .order_by(Acordo.uf)\
-                        .group_by(Acordo.uf,Programa_CNPq.SIGLA_PROGRAMA,Programa_CNPq.COD_PROGRAMA)\
-                        .all()                                        
-
-    ufs = [a.uf for a in acordos]
-    ufs = set(ufs)
-    ufs = list(ufs)
-    ufs.sort()
-
-    quantidade = len(ufs)
-
-    programas_int = [p.SIGLA_PROGRAMA+'*'+p.COD_PROGRAMA for p in acordos]
-    programas_int = set(programas_int)
-    programas_int = list(programas_int)
-    programas_int.sort()
-
-    linha = []
-    linhas = []
-    item = []
-
-    for uf in ufs:
-        for prog in programas_int:
-            flag = False
-            for acordo in acordos:
-
-                if acordo.uf == uf:
-                    if acordo.SIGLA_PROGRAMA == prog.split('*')[0]:
-                        linha.append(acordo)
-                        flag = True
-                    else:
-                        item = [uf,prog.split('*')[0],0,0,prog.split('*')[1]]
-
-            if not flag:
-                linha.append(item)
-                flag = False
-
-        linhas.append(linha)
-        linha=[]
-
-    return render_template('quadro_acordos.html', quantidade=quantidade,
-                            programas=programas_int,linhas=linhas)
+    return render_template('quadro_acordos.html', quantidade=dados['quantidade'],
+                            programas=dados['programas'],linhas=dados['linhas'])
 
 #
 ### gasto mês por acordo  (DESCONTINUADO)
@@ -1755,69 +1574,16 @@ def gasto_mes(acordo_id,edic,epe,uf):
     +---------------------------------------------------------------------------------------+
     """
 
-    gastos = []
+    gastos = services.gasto_mensal_por_acordo(acordo_id)
 
-    procs_mae = db.session.query(Acordo_ProcMae.proc_mae_id,
-                                 Processo_Mae.proc_mae,
-                                 Processo_Mae.inic_mae,
-                                 Processo_Mae.term_mae)\
-                          .join(Processo_Mae, Processo_Mae.id == Acordo_ProcMae.proc_mae_id)\
-                          .filter(Acordo_ProcMae.acordo_id == acordo_id).all()
-
-    if procs_mae:                      
-
-        for proc in procs_mae:
-
-            pags_proc_mae = db.session.query(label('vl_pago',func.sum(PagamentosPDCTR.valor_pago)),
-                                            label('qtd',func.count(PagamentosPDCTR.valor_pago)),
-                                            PagamentosPDCTR.data_pagamento)\
-                                    .group_by(PagamentosPDCTR.data_pagamento)\
-                                    .filter(PagamentosPDCTR.proc_mae == proc.proc_mae).all()
-
-            #datas com dias trocados para evita problemas com rrule
-            strt_dt = datetime.date(proc.inic_mae.year,proc.inic_mae.month,1)
-            end_dt  = datetime.date(proc.term_mae.year,proc.term_mae.month,28)
-
-            dates = [dt for dt in rrule(MONTHLY, dtstart=strt_dt, until=end_dt)]
-
-            for d in dates:
-
-                d1 = datetime.date(d.year,d.month,1)
-
-                p = 0
-                q = 0
-                for pag in pags_proc_mae:
-                    #if pag.data_pagamento == d1:
-                    if pag.data_pagamento.year == d.year and pag.data_pagamento.month == d.month:
-                        p = pag.vl_pago
-                        q = pag.qtd
-
-                gastos.append((d1,p,q))
-
-        datas = set([x[0] for x in gastos])
-
-        lista = []
-        for d in datas:
-            v = 0
-            qtd = 0
-            for g in gastos:
-                if g[0] == d:
-                    v += g[1]
-                    qtd += g[2]
-            lista.append((d,v,qtd))
-
-        lista.sort(key = lambda x: x[0])
-
-        gastos = [ (x[0].year,x[0].month,locale.currency(x[1], symbol=False, grouping = True),x[2]) for x in lista ]
-
-        return render_template('gasto_mes.html',gastos=gastos,qtd_meses=len(gastos),
-                                                    prog='',edic=edic,epe=epe,uf=uf)
-
-    else:
+    if gastos is None:
         flash('Não há processos-mãe registrados!','erro')
-
         return render_template('gasto_mes.html',gastos=[],qtd_meses=0,
                                                     prog='',edic=edic,epe=epe,uf=uf)
+
+    return render_template('gasto_mes.html',gastos=gastos,qtd_meses=len(gastos),
+                                                prog='',edic=edic,epe=epe,uf=uf)
+
 #
 #
 # pega dados de programas no DW
