@@ -20,3 +20,6 @@
 /migrations/__pycache__
 /migrations/versions/__pycache__
 /tests/__pycache__
+/project/static/programas_conv.csv
+/project/static/convenios.csv
+/project/static/convenio.pdf
