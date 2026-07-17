@@ -76,7 +76,7 @@ from project.acordos.forms import AcordoForm, Programa_CNPqForm, func_ProcMae_Ac
                                   Altera_proc_mae_Form, ProgAcordoForm, Inclui_proc_mae_Form, ChamadaAcordoForm,\
                                   EscolheMaeForm
 from project.demandas.views import registra_log_auto
-from project.core.views import consultaDW, chamadas_DW
+from project.core.services import consultaDW, chamadas_DW
 
 import locale
 import datetime

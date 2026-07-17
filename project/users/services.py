@@ -28,7 +28,7 @@ from sqlalchemy.sql import label
 from project import db, mail, app, sched
 from project.models import User, Coords, Sistema, Demanda, Providencia, Despacho, Log_Auto, Plano_Trabalho, Ativ_Usu, RefSICONV, Log_Desc, Msgs_Recebidas
 from project.demandas.views import registra_log_auto
-from project.core.views import cargaSICONV, chamadas_DW
+from project.core.services import cargaSICONV, chamadas_DW
 
 
 # --- envio de e-mail ---

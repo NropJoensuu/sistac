@@ -111,6 +111,14 @@ def registra_log_auto(user_id,demanda_id,tipo_registro,atividade=None,duracao=0)
     |Os tipos de registro estão na tabela log_desc.                                         |
     +---------------------------------------------------------------------------------------+
     """
+    # BUG CORRIGIDO: user_id=None sempre quebrava com NotNullViolation
+    # (a coluna log_auto.user_id não aceita nulo). Isso acontecia em
+    # vários pontos do sistema (agendamentos numa instalação nova, sem
+    # nenhum log anterior para identificar o usuário responsável).
+    # Pular o registro nesse caso é estritamente mais seguro do que
+    # quebrar — não há regressão possível, já que antes sempre crashava.
+    if user_id is None:
+        return
 
     reg_log = Log_Auto(data_hora     = datetime.now(),
                        user_id       = user_id,
