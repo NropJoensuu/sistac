@@ -21,9 +21,10 @@ from project import db
 from project.models import (
     Acordo, Acordo_ProcMae, Processo_Mae, Processo_Filho, Coords,
     Programa_CNPq, grupo_programa_cnpq, chamadas_cnpq, chamadas_cnpq_acordos,
-    PagamentosPDCTR,
+    PagamentosPDCTR, Chamadas, DadosSEI, financeiro_acordo,
 )
 from project.demandas.views import registra_log_auto
+from project.core.services import consultaDW, chamadas_DW
 
 
 def acordo_id_por_proc_mae(proc_mae_id):
@@ -704,3 +705,149 @@ def bolsistas_do_acordo(acordo_id):
     cpfs = [_formata_bolsista(cpf) for cpf in cpfs_banco]
 
     return l_procs_mae, cpfs
+
+
+# =============================================================================
+# Integração DW
+# =============================================================================
+
+def carregar_programas_por_unidade_DW(unidade):
+    """
+    Alimenta a tabela Programa_CNPq com dados do Data Warehouse,
+    restringindo a busca aos registros relacionados à unidade
+    informada (e suas filhas, se houver).
+    """
+    l_unid = _unidades_hierarquia(unidade)
+
+    u = 0
+    pn = pa = 0
+
+    for unid in l_unid:
+        u += 1
+
+        consulta = consultaDW(tipo='programas_unid', unid=unid)
+
+        for item in consulta:
+            programa = db.session.query(Programa_CNPq)\
+                                 .filter(Programa_CNPq.COD_PROGRAMA == item[0], Programa_CNPq.COORD == item[3])\
+                                 .first()
+
+            if not programa:
+                pn += 1
+                novo_programa = Programa_CNPq(
+                    COD_PROGRAMA=item[0], NOME_PROGRAMA=item[1],
+                    SIGLA_PROGRAMA=item[2], COORD=item[3],
+                )
+                db.session.add(novo_programa)
+            else:
+                pa += 1
+                programa.NOME_PROGRAMA = item[1]
+                programa.SIGLA_PROGRAMA = item[2]
+                programa.COORD = item[3]
+
+    db.session.commit()
+
+    return pn, pa, u
+
+
+def carregar_chamadas_programa_DW():
+    """Executa a carga de chamadas/processos-mãe/filhos do DW (delega para chamadas_DW do core)."""
+    return chamadas_DW()
+
+
+def carregar_dados_financeiros_acordos_DW(unidade):
+    """
+    Alimenta a tabela financeiro_acordo com dados financeiros obtidos
+    do Data Warehouse, para os acordos da unidade informada (e suas
+    filhas, se houver).
+    """
+    l_unid = _unidades_hierarquia(unidade)
+
+    dfn = 0
+
+    acordos = db.session.query(Acordo).filter(Acordo.unidade_cnpq.in_(l_unid)).all()
+
+    for acordo in acordos:
+        processos = db.session.query(Processo_Mae.proc_mae)\
+                              .join(Acordo_ProcMae, Acordo_ProcMae.proc_mae_id == Processo_Mae.id)\
+                              .filter(Acordo_ProcMae.acordo_id == acordo.id)\
+                              .all()
+        if processos:
+            l_processos_mae = [(p.proc_mae[7:11] + p.proc_mae[:6] + p.proc_mae[-1]) for p in processos]
+        else:
+            l_processos_mae = []
+
+        processos_filho = db.session.query(Processo_Filho.processo)\
+                              .join(Processo_Mae, Processo_Mae.proc_mae == Processo_Filho.proc_mae)\
+                              .join(Acordo_ProcMae, Acordo_ProcMae.proc_mae_id == Processo_Mae.id)\
+                              .filter(Acordo_ProcMae.acordo_id == acordo.id)\
+                              .all()
+        if processos_filho:
+            l_processos_filho = [(p.processo[7:11] + p.processo[:6] + p.processo[-1]) for p in processos_filho]
+        else:
+            l_processos_filho = []
+
+        l_processos = l_processos_mae + l_processos_filho
+
+        if len(l_processos) >= 1:
+
+            if len(l_processos) == 1:
+                l_processos = f"('{l_processos[0]}')"
+            else:
+                l_processos = tuple(l_processos)
+
+            dados_financeiros = consultaDW(tipo='financeiro_processos', lista_processos=l_processos)
+
+            db.session.query(financeiro_acordo).filter(financeiro_acordo.id_acordo == acordo.id).delete()
+            db.session.commit()
+
+            for dados in dados_financeiros:
+                novo_financeiro = financeiro_acordo(
+                    id_acordo=acordo.id, qtd_item_despesa=dados[0], valor_total_item_despesa=dados[1],
+                    cod_fonte_recurso=dados[2], nme_fonte_recurso=dados[3], cod_plano_interno=dados[4],
+                    nme_plano_interno=dados[5], nme_categ_economica=dados[6], nme_natur_desp=dados[7],
+                )
+                db.session.add(novo_financeiro)
+                dfn += 1
+
+    db.session.commit()
+
+    return dfn
+
+
+def dados_financeiros_do_acordo(acordo_id):
+    """
+    Retorna o acordo e seus dados financeiros. Retorna acordo=None se
+    o acordo não existir (corrige bug real: o código original não
+    checava se a consulta retornou algo antes de usar o resultado no
+    template).
+    """
+    acordo = db.session.query(Acordo).filter(Acordo.id == acordo_id).first()
+
+    dados_financeiros = db.session.query(financeiro_acordo).filter(financeiro_acordo.id_acordo == acordo_id).all()
+
+    return acordo, dados_financeiros
+
+
+def atualizar_id_relaciona_chamadas():
+    """
+    Uso eventual: para cada chamada, tenta relacioná-la a um acordo ou
+    convênio existente (mesmo SEI), preenchendo id_relaciona.
+    """
+    chamadas = db.session.query(Chamadas).all()
+    i = 0
+
+    for chamada in chamadas:
+        acordo = db.session.query(Acordo.id).filter(Acordo.sei == chamada.sei).first()
+        if acordo:
+            chamada.id_relaciona = acordo.id
+            i += 1
+        else:
+            convenio = db.session.query(DadosSEI.nr_convenio).filter(DadosSEI.sei == chamada.sei).first()
+            if convenio:
+                chamada.id_relaciona = 'C' + convenio.nr_convenio
+                i += 1
+
+    db.session.commit()
+
+    return i
