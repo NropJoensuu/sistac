@@ -105,51 +105,6 @@ def none_0(a):
         a = 0
     return a
 
-def cargaSit(entrada):
-
-    print ('\n')
-    print ('<<',dt.now().strftime("%x %X"),'>> ',' Carga de arquivo de situações de processos-filho iniciada...')
-
-    book = xlrd.open_workbook(filename=entrada,ragged_rows=True)
-    planilha = book.sheet_by_index(0)
-
-    linha_cabeçalho = planilha.row_values(0, start_colx=0, end_colx=None)
-
-    print ('Planilha: SIGEF')
-    print (f'Cabeçalho original: {len(linha_cabeçalho)} campos')
-    print (f'Quantidade de registros na planilha: {planilha.nrows - 1 }')
-    print ('\n')
-
-    qtd_linhas = planilha.nrows - 1
-
-    for i in range(qtd_linhas):
-
-        linha_base = planilha.row_values(i + 1, start_colx=0, end_colx=None)
-
-        proc = planilha.cell_value(i + 1, linha_cabeçalho.index('Processo'))
-        sit  = planilha.cell_value(i + 1, linha_cabeçalho.index('Situação'))
-
-        processo_filho = db.session.query(Processo_Filho).filter(Processo_Filho.processo == proc).all()
-
-        for p in processo_filho:
-
-            if p.situ_filho != sit:
-                p.situ_filho = sit
-
-        db.session.commit()
-
-        pag_PDCTR = db.session.query(PagamentosPDCTR).filter(PagamentosPDCTR.processo == proc).all()
-
-        for p in pag_PDCTR:
-
-            if p.situ_filho != sit:
-                p.situ_filho = sit
-
-        db.session.commit()
-
-    print ('Carga finalizada!')
-    print ('\n')
-
 #
 def cria_csv(arq,linha,tabela):
   '''Recebe caminho do arquivo como string, campos da tabela como lista e a tabela propriamente dita'''
@@ -1311,7 +1266,6 @@ def atualiza_programa_cnpq(id):
 
 #
 ### LISTAR processos mãe de um acordo
-### LISTAR processos mãe de um acordo
 
 @acordos.route("/<int:acordo_id>/lista_processos_mae_por_acordo")
 def lista_processos_mae_por_acordo(acordo_id):
@@ -1321,39 +1275,13 @@ def lista_processos_mae_por_acordo(acordo_id):
     +---------------------------------------------------------------------------------------+
     """
 
-    acordo = db.session.query(Acordo).filter(Acordo.id == acordo_id).first()
+    acordo, processos = services.processos_mae_do_acordo(acordo_id)
 
-    processos = db.session.query(Acordo_ProcMae.proc_mae_id,
-                                 Processo_Mae.proc_mae,
-                                 Processo_Mae.coordenador,
-                                 Processo_Mae.inic_mae,
-                                 Processo_Mae.term_mae,
-                                 Processo_Mae.situ_mae,
-                                 label('qtd_filhos',func.count(Processo_Filho.processo)),
-                                 label('pago',func.sum(Processo_Filho.pago_total)),
-                                 label('max_ult_pag',func.max(Processo_Filho.dt_ult_pag)),
-                                 Processo_Mae.pago_custeio,
-                                 Processo_Mae.pago_capital,
-                                 label('pago_cap_cus',Processo_Mae.pago_custeio + Processo_Mae.pago_capital),
-                                 Processo_Mae.id_chamada)\
-                          .join(Processo_Mae, Processo_Mae.id == Acordo_ProcMae.proc_mae_id)\
-                          .outerjoin(Processo_Filho, Processo_Filho.proc_mae == Processo_Mae.proc_mae)\
-                          .filter(Acordo_ProcMae.acordo_id == acordo_id)\
-                          .group_by(Acordo_ProcMae.proc_mae_id,
-                                    Processo_Mae.proc_mae,
-                                    Processo_Mae.coordenador,
-                                    Processo_Mae.inic_mae,
-                                    Processo_Mae.term_mae,
-                                    Processo_Mae.situ_mae,
-                                    Processo_Mae.pago_custeio,
-                                    Processo_Mae.pago_capital,
-                                    Processo_Mae.id_chamada)\
-                          .all()                      
+    if acordo is None:
+        abort(404)
 
-    qtd_processos = len(processos)
-    
     return render_template('lista_processos_mae.html',procs_mae=processos,
-                                                      qtd_processos=qtd_processos,
+                                                      qtd_processos=len(processos),
                                                       chamada = None,
                                                       acordo_id=acordo.id,
                                                       acordo_tit=acordo.nome +' '+ acordo.epe +'-'+ acordo.uf)
@@ -1368,18 +1296,16 @@ def altera_mae(acordo_id,proc_mae):
     +---------------------------------------------------------------------------------------+
     """
 
-    processo_mae = db.session.query(Processo_Mae).filter(Processo_Mae.proc_mae == proc_mae.replace('_','/')).first()
+    processo_mae = services.buscar_processo_mae_por_texto(proc_mae)
+
+    if processo_mae is None:
+        abort(404)
 
     form = Altera_proc_mae_Form()
 
     if form.validate_on_submit():
 
-        processo_mae.coordenador = form.coordenador.data
-        processo_mae.situ_mae    = form.situ_mae.data
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'mae')
+        services.atualizar_processo_mae_manual(processo_mae, form.coordenador.data, form.situ_mae.data, current_user.id)
 
         flash('Dados de processo-mãe atualizados manualmente!','sucesso')
         return redirect(url_for('acordos.lista_processos_mae_por_acordo',acordo_id=acordo_id))
@@ -1406,33 +1332,12 @@ def processo_mae_acordo(acordo_id):
     +---------------------------------------------------------------------------------------+
     """
 
-    # chamadas do acordo
-    chamadas = db.session.query(chamadas_cnpq)\
-                         .join(chamadas_cnpq_acordos, chamadas_cnpq_acordos.chamada_cnpq_id == chamadas_cnpq.id)\
-                         .filter(chamadas_cnpq_acordos.acordo_id == acordo_id)\
-                         .all()
-
-    lista_chamadas = [c.id for c in chamadas]
-
-    # processos mãe das chamadas
-    maes = db.session.query(Processo_Mae).filter(Processo_Mae.id_chamada.in_(lista_chamadas))
-
-    lista_maes = [(str(m.id),m.proc_mae) for m in maes]
-
     form = EscolheMaeForm()
-
-    form.mae.choices = lista_maes
+    form.mae.choices = services.maes_disponiveis_para_acordo(acordo_id)
 
     if form.validate_on_submit():
 
-        for mae in form.mae.data:
-            acordo_procmae = Acordo_ProcMae(acordo_id   = acordo_id,
-                                            proc_mae_id = int(mae))
-            db.session.add(acordo_procmae)
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'ass')
+        services.associar_maes_ao_acordo(acordo_id, form.mae.data, current_user.id)
 
         flash('Processo Mãe relacionado ao Acordo!','sucesso')
         return redirect(url_for('acordos.lista_processos_mae_por_acordo',acordo_id=acordo_id))
@@ -1453,30 +1358,15 @@ def inclui_proc_mae(acordo_id):
 
     if form.validate_on_submit():
 
-        proc_mae_manual = Processo_Mae(cod_programa = None,
-                                       nome_chamada = None,
-                                       proc_mae     = form.proc_mae.data,
-                                       inic_mae     = form.inic_mae.data,
-                                       term_mae     = form.term_mae.data,
-                                       coordenador  = form.coordenador.data,
-                                       situ_mae     = form.situ_mae.data,
-                                       id_chamada   = None,
-                                       pago_capital = 0,
-                                       pago_custeio = 0,
-                                       pago_bolsas  = 0)                    
-
-        db.session.add(proc_mae_manual)              
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'mae')
-
-        acordo_procmae = Acordo_ProcMae(acordo_id   = acordo_id,
-                                        proc_mae_id = proc_mae_manual.id)
-
-        db.session.add(acordo_procmae)
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'ass')
+        services.incluir_processo_mae_manual(
+            acordo_id=acordo_id,
+            proc_mae=form.proc_mae.data,
+            inic_mae=form.inic_mae.data,
+            term_mae=form.term_mae.data,
+            coordenador=form.coordenador.data,
+            situ_mae=form.situ_mae.data,
+            usuario_id=current_user.id,
+        )
 
         flash('Processo-mãe inseridos manualmente e relacionado ao Acordo/TED!','sucesso')
 
@@ -1499,17 +1389,12 @@ def deleta_processo_mae(processo_mae_id,acordo_id):
     +---------------------------------------------------------------------------------------+
     """
 
-    assoc = db.session.query(Acordo_ProcMae)\
-                      .filter(Acordo_ProcMae.acordo_id == acordo_id, 
-                              Acordo_ProcMae.proc_mae_id == processo_mae_id)\
-                      .first()
+    excluida = services.excluir_associacao_processo_mae(processo_mae_id, acordo_id, current_user.id)
 
-    db.session.delete(assoc)
-    db.session.commit()
-
-    registra_log_auto(current_user.id,None,'ass')
-
-    flash ('Associação Processo Mãe - Acordo desfeita!','sucesso')
+    if excluida:
+        flash ('Associação Processo Mãe - Acordo desfeita!','sucesso')
+    else:
+        flash ('Associação não encontrada — nada para desfazer.','erro')
 
     return redirect(url_for('acordos.lista_processos_mae_por_acordo',acordo_id=acordo_id))
 
@@ -1523,39 +1408,13 @@ def lista_processos_filho(proc_mae):
     |Lista os processos filho de um determinado processo mãe.                               |
     +---------------------------------------------------------------------------------------+
     """
-    lista = 'mae'
 
-    filhos_banco = db.session.query(Processo_Filho.processo,
-                              Processo_Filho.nome,
-                              Processo_Filho.cpf,
-                              Processo_Filho.modalidade,
-                              Processo_Filho.nivel,
-                              Processo_Filho.situ_filho,
-                              Processo_Filho.inic_filho,
-                              Processo_Filho.term_filho,
-                              Processo_Filho.mens_pagas,
-                              Processo_Filho.pago_total,
-                              Processo_Filho.dt_ult_pag)\
-                       .filter(Processo_Filho.proc_mae == proc_mae.replace('_','/'))\
-                       .order_by(Processo_Filho.nome,Processo_Filho.situ_filho)\
-                       .all()
-
-    qtd_filhos = db.session.query(Processo_Filho.proc_mae,
-                                  label('qtd_filhos',func.count(distinct(Processo_Filho.processo))))\
-                           .filter(Processo_Filho.proc_mae == proc_mae.replace('_','/'))\
-                           .group_by(Processo_Filho.proc_mae)\
-                           .first()
-    
-    if filhos_banco:
-        ult_pag = [filho.dt_ult_pag for filho in filhos_banco]
-        max_ult_pag = max(ult_pag).strftime("%m/%Y")
-    else:
-        max_ult_pag = 0
+    filhos_banco, qtd_filhos, max_ult_pag = services.processos_filho_do_mae(proc_mae)
 
     return render_template('lista_processos_filho.html',proc_mae=proc_mae,
                                                         filhos=filhos_banco,
-                                                        qtd_filhos=qtd_filhos.qtd_filhos,
-                                                        lista=lista,
+                                                        qtd_filhos=qtd_filhos,
+                                                        lista='mae',
                                                         max_ult_pag=max_ult_pag)
 
 #
@@ -1571,17 +1430,12 @@ def carrega_sit_sigef(proc_mae,edic,epe,uf):
 
     if form.validate_on_submit():
 
-        tempdirectory = tempfile.gettempdir()
-
-        f = form.arquivo.data
-        fname = secure_filename(f.filename)
-        arq_sigef = os.path.join(tempdirectory, fname)
-        f.save(arq_sigef)
+        arq_sigef = services.salvar_arquivo_upload(form.arquivo.data)
 
         print ('\n')
         print ('***  ARQUIVO ***',arq_sigef)
 
-        cargaSit(arq_sigef)
+        services.cargaSit(arq_sigef)
 
         registra_log_auto(current_user.id,None,'car')
 
@@ -1600,47 +1454,10 @@ def lista_bolsistas(proc_mae):
     +---------------------------------------------------------------------------------------+
     """
 
-    cpfs_banco = db.session.query(Processo_Filho.nome,
-                              Processo_Filho.cpf,
-                              Processo_Filho.modalidade,
-                              Processo_Filho.nivel,
-                              Processo_Filho.situ_filho,
-                              label('min_inic_filho',func.min(Processo_Filho.inic_filho)),
-                              label('max_term_filho',func.max(Processo_Filho.term_filho)),
-                              label('mens_p',func.sum(Processo_Filho.mens_pagas)),
-                              label('pago',func.sum(Processo_Filho.pago_total)),
-                              label('mens_ap',func.sum(Processo_Filho.mens_apagar)),
-                              label('apagar',func.sum(Processo_Filho.valor_apagar)))\
-                       .filter(Processo_Filho.proc_mae == proc_mae.replace('_','/'))\
-                       .group_by(Processo_Filho.cpf,
-                                 Processo_Filho.nome,
-                                 Processo_Filho.modalidade,
-                                 Processo_Filho.nivel,
-                                 Processo_Filho.situ_filho)\
-                       .order_by(Processo_Filho.nome).all()
-
-    qtd_cpfs = len(cpfs_banco)
-
-    cpfs = []
-
-    for cpf in cpfs_banco:
-
-        cpfs.append([cpf.nome,
-                       cpf.cpf,
-                       cpf.modalidade,
-                       cpf.nivel,
-                       cpf.situ_filho,
-                       cpf.min_inic_filho.strftime("%x"),
-                       cpf.max_term_filho.strftime("%x"),
-                       cpf.mens_p,
-                       locale.currency(cpf.pago, symbol=False, grouping = True),
-                       cpf.mens_ap,
-                       locale.currency(cpf.apagar, symbol=False, grouping = True)])
-
-
+    cpfs = services.bolsistas_do_processo_mae(proc_mae)
 
     return render_template('lista_bolsistas.html',proc_mae=proc_mae,cpfs=cpfs,
-                                                   qtd_cpfs=qtd_cpfs,
+                                                   qtd_cpfs=len(cpfs),
                                                    prog='',edic='',epe='',uf='')
 #
 ### LISTAR processos filhos de um acordo
@@ -1652,48 +1469,15 @@ def lista_processos_filho_por_acordo(acordo_id):
     |Lista os processos filhos vinculados a um acordo.                                      |
     +---------------------------------------------------------------------------------------+
     """
-    lista = 'acordo'
 
-    acordo = db.session.get(Acordo, acordo_id)
+    dados = services.processos_filho_do_acordo(acordo_id)
 
-    procs_mae = db.session.query(Processo_Mae.proc_mae)\
-                          .join(Acordo_ProcMae, Processo_Mae.id == Acordo_ProcMae.proc_mae_id)\
-                          .filter(Acordo_ProcMae.acordo_id == acordo_id).all()
-
-    qtd_maes = len(procs_mae)
-
-    l_procs_mae = [p.proc_mae for p in procs_mae]
-
-    filhos_banco = db.session.query(Processo_Filho.processo,
-                                Processo_Filho.nome,
-                                Processo_Filho.cpf,
-                                Processo_Filho.modalidade,
-                                Processo_Filho.nivel,
-                                Processo_Filho.situ_filho,
-                                Processo_Filho.inic_filho,
-                                Processo_Filho.term_filho,
-                                Processo_Filho.mens_pagas,
-                                Processo_Filho.pago_total,
-                                Processo_Filho.dt_ult_pag,
-                                Processo_Filho.valor_apagar,
-                                Processo_Filho.mens_apagar)\
-                        .filter(Processo_Filho.proc_mae.in_(l_procs_mae))\
-                        .order_by(Processo_Filho.situ_filho,Processo_Filho.nome).all()
-
-    qtd_filhos = len(filhos_banco)
-
-    if filhos_banco:
-        ult_pag = [filho.dt_ult_pag for filho in filhos_banco]
-        max_ult_pag = max(ult_pag).strftime("%m/%Y")
-    else:
-        max_ult_pag = 0    
-
-    return render_template('lista_processos_filho.html',filhos=filhos_banco,
-                                                        qtd_maes=qtd_maes,
-                                                        qtd_filhos=qtd_filhos,
-                                                        lista=lista,
-                                                        acordo=acordo,
-                                                        max_ult_pag=max_ult_pag)
+    return render_template('lista_processos_filho.html',filhos=dados['filhos'],
+                                                        qtd_maes=dados['qtd_maes'],
+                                                        qtd_filhos=dados['qtd_filhos'],
+                                                        lista='acordo',
+                                                        acordo=dados['acordo'],
+                                                        max_ult_pag=dados['max_ult_pag'])
 #
 
 #
@@ -1707,59 +1491,10 @@ def lista_bolsistas_acordo(acordo_id):
     +---------------------------------------------------------------------------------------+
     """
 
-    lista = 'acordo'
-
-    procs_mae = db.session.query(Processo_Mae.proc_mae)\
-                          .join(Acordo_ProcMae, Processo_Mae.id == Acordo_ProcMae.proc_mae_id)\
-                          .filter(Acordo_ProcMae.acordo_id == acordo_id).all()
-
-    l_procs_mae = [p.proc_mae for p in procs_mae]
-
-    qtd_maes = len(procs_mae)
-
-    filhos = []
-    qtd_filhos = 0
-    ultimo_pag = []
-
-    cpfs_banco = db.session.query(Processo_Filho.nome,
-                              Processo_Filho.cpf,
-                              Processo_Filho.modalidade,
-                              Processo_Filho.nivel,
-                              Processo_Filho.situ_filho,
-                              label('min_inic_filho',func.min(Processo_Filho.inic_filho)),
-                              label('max_term_filho',func.max(Processo_Filho.term_filho)),
-                              label('mens_p',func.sum(Processo_Filho.mens_pagas)),
-                              label('pago',func.sum(Processo_Filho.pago_total)),
-                              label('mens_ap',func.sum(Processo_Filho.mens_apagar)),
-                              label('apagar',func.sum(Processo_Filho.valor_apagar)))\
-                       .filter(Processo_Filho.proc_mae.in_(l_procs_mae))\
-                       .group_by(Processo_Filho.cpf,
-                                 Processo_Filho.nome,
-                                 Processo_Filho.modalidade,
-                                 Processo_Filho.nivel,
-                                 Processo_Filho.situ_filho)\
-                       .order_by(Processo_Filho.nome).all()
-
-    qtd_cpfs = len(cpfs_banco)
-
-    cpfs = []
-
-    for cpf in cpfs_banco:
-
-        cpfs.append([cpf.nome,
-                       cpf.cpf,
-                       cpf.modalidade,
-                       cpf.nivel,
-                       cpf.situ_filho,
-                       cpf.min_inic_filho.strftime("%x"),
-                       cpf.max_term_filho.strftime("%x"),
-                       cpf.mens_p,
-                       locale.currency(cpf.pago, symbol=False, grouping = True),
-                       cpf.mens_ap,
-                       locale.currency(cpf.apagar, symbol=False, grouping = True)])
+    l_procs_mae, cpfs = services.bolsistas_do_acordo(acordo_id)
 
     return render_template('lista_bolsistas.html',proc_mae=l_procs_mae,cpfs=cpfs,
-                                                   qtd_cpfs=qtd_cpfs,
+                                                   qtd_cpfs=len(cpfs),
                                                    prog='',edic='',epe='',uf='')
 #
 ## RESUMO acordos

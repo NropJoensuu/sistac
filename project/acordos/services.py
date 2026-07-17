@@ -7,6 +7,13 @@
     (views.py) decidem o que fazer com o resultado.
 """
 
+import os
+import tempfile
+import locale
+from datetime import datetime as dt
+
+import xlrd
+from werkzeug.utils import secure_filename
 from sqlalchemy import func, distinct
 from sqlalchemy.sql import label
 
@@ -14,6 +21,7 @@ from project import db
 from project.models import (
     Acordo, Acordo_ProcMae, Processo_Mae, Processo_Filho, Coords,
     Programa_CNPq, grupo_programa_cnpq, chamadas_cnpq, chamadas_cnpq_acordos,
+    PagamentosPDCTR,
 )
 from project.demandas.views import registra_log_auto
 
@@ -359,3 +367,340 @@ def resumo_edicoes_programa(cod_programa):
                                chamadas.c.pago_chamada)\
                      .order_by(Acordo.nome)\
                      .all()
+
+
+# =============================================================================
+# Processos mãe / filho / bolsistas
+# =============================================================================
+
+def cargaSit(entrada):
+    """
+    Lê a planilha de situações (gerada via SIGEF) e atualiza a
+    situação dos processos-filho e pagamentos PDCTR correspondentes.
+    """
+    print('\n')
+    print('<<', dt.now().strftime("%x %X"), '>> ', ' Carga de arquivo de situações de processos-filho iniciada...')
+
+    book = xlrd.open_workbook(filename=entrada, ragged_rows=True)
+    planilha = book.sheet_by_index(0)
+
+    linha_cabeçalho = planilha.row_values(0, start_colx=0, end_colx=None)
+
+    print('Planilha: SIGEF')
+    print(f'Cabeçalho original: {len(linha_cabeçalho)} campos')
+    print(f'Quantidade de registros na planilha: {planilha.nrows - 1}')
+    print('\n')
+
+    qtd_linhas = planilha.nrows - 1
+
+    for i in range(qtd_linhas):
+
+        proc = planilha.cell_value(i + 1, linha_cabeçalho.index('Processo'))
+        sit = planilha.cell_value(i + 1, linha_cabeçalho.index('Situação'))
+
+        processo_filho = db.session.query(Processo_Filho).filter(Processo_Filho.processo == proc).all()
+
+        for p in processo_filho:
+            if p.situ_filho != sit:
+                p.situ_filho = sit
+
+        db.session.commit()
+
+        pag_PDCTR = db.session.query(PagamentosPDCTR).filter(PagamentosPDCTR.processo == proc).all()
+
+        for p in pag_PDCTR:
+            if p.situ_filho != sit:
+                p.situ_filho = sit
+
+        db.session.commit()
+
+    print('Carga finalizada!')
+    print('\n')
+
+
+def salvar_arquivo_upload(arquivo_form):
+    """Salva o arquivo enviado por um FileField num diretório temporário, e retorna o caminho."""
+    tempdirectory = tempfile.gettempdir()
+    fname = secure_filename(arquivo_form.filename)
+    caminho = os.path.join(tempdirectory, fname)
+    arquivo_form.save(caminho)
+    return caminho
+
+
+def processos_mae_do_acordo(acordo_id):
+    """
+    Retorna o acordo e os processos-mãe vinculados a ele. Retorna
+    acordo=None se o acordo não existir (corrige bug real: o código
+    original acessava `.id`/`.nome`/`.epe`/`.uf` sem checar se a
+    consulta retornou algo).
+    """
+    acordo = db.session.query(Acordo).filter(Acordo.id == acordo_id).first()
+
+    processos = db.session.query(Acordo_ProcMae.proc_mae_id,
+                                 Processo_Mae.proc_mae,
+                                 Processo_Mae.coordenador,
+                                 Processo_Mae.inic_mae,
+                                 Processo_Mae.term_mae,
+                                 Processo_Mae.situ_mae,
+                                 label('qtd_filhos', func.count(Processo_Filho.processo)),
+                                 label('pago', func.sum(Processo_Filho.pago_total)),
+                                 label('max_ult_pag', func.max(Processo_Filho.dt_ult_pag)),
+                                 Processo_Mae.pago_custeio,
+                                 Processo_Mae.pago_capital,
+                                 label('pago_cap_cus', Processo_Mae.pago_custeio + Processo_Mae.pago_capital),
+                                 Processo_Mae.id_chamada)\
+                          .join(Processo_Mae, Processo_Mae.id == Acordo_ProcMae.proc_mae_id)\
+                          .outerjoin(Processo_Filho, Processo_Filho.proc_mae == Processo_Mae.proc_mae)\
+                          .filter(Acordo_ProcMae.acordo_id == acordo_id)\
+                          .group_by(Acordo_ProcMae.proc_mae_id,
+                                    Processo_Mae.proc_mae,
+                                    Processo_Mae.coordenador,
+                                    Processo_Mae.inic_mae,
+                                    Processo_Mae.term_mae,
+                                    Processo_Mae.situ_mae,
+                                    Processo_Mae.pago_custeio,
+                                    Processo_Mae.pago_capital,
+                                    Processo_Mae.id_chamada)\
+                          .all()
+
+    return acordo, processos
+
+
+def buscar_processo_mae_por_texto(proc_mae):
+    """Busca um processo-mãe pelo número formatado (com '_' trocado por '/')."""
+    return db.session.query(Processo_Mae).filter(Processo_Mae.proc_mae == proc_mae.replace('_', '/')).first()
+
+
+def atualizar_processo_mae_manual(processo_mae, coordenador, situ_mae, usuario_id):
+    """Atualiza manualmente o coordenador e a situação de um processo-mãe."""
+    processo_mae.coordenador = coordenador
+    processo_mae.situ_mae = situ_mae
+
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'mae')
+
+
+def maes_disponiveis_para_acordo(acordo_id):
+    """Retorna os processos-mãe das chamadas associadas a um acordo, formatados para um SelectField."""
+    chamadas = db.session.query(chamadas_cnpq)\
+                         .join(chamadas_cnpq_acordos, chamadas_cnpq_acordos.chamada_cnpq_id == chamadas_cnpq.id)\
+                         .filter(chamadas_cnpq_acordos.acordo_id == acordo_id)\
+                         .all()
+
+    lista_chamadas = [c.id for c in chamadas]
+
+    maes = db.session.query(Processo_Mae).filter(Processo_Mae.id_chamada.in_(lista_chamadas))
+
+    return [(str(m.id), m.proc_mae) for m in maes]
+
+
+def associar_maes_ao_acordo(acordo_id, lista_ids_mae, usuario_id):
+    """Associa um ou mais processos-mãe a um acordo."""
+    for mae in lista_ids_mae:
+        acordo_procmae = Acordo_ProcMae(acordo_id=acordo_id, proc_mae_id=int(mae))
+        db.session.add(acordo_procmae)
+
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'ass')
+
+
+def incluir_processo_mae_manual(acordo_id, proc_mae, inic_mae, term_mae, coordenador, situ_mae, usuario_id):
+    """Registra manualmente um processo-mãe no sistema e o associa a um acordo."""
+    proc_mae_manual = Processo_Mae(
+        cod_programa=None, nome_chamada=None, proc_mae=proc_mae, inic_mae=inic_mae,
+        term_mae=term_mae, coordenador=coordenador, situ_mae=situ_mae, id_chamada=None,
+        pago_capital=0, pago_custeio=0, pago_bolsas=0,
+    )
+
+    db.session.add(proc_mae_manual)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'mae')
+
+    acordo_procmae = Acordo_ProcMae(acordo_id=acordo_id, proc_mae_id=proc_mae_manual.id)
+
+    db.session.add(acordo_procmae)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'ass')
+
+    return proc_mae_manual
+
+
+def excluir_associacao_processo_mae(processo_mae_id, acordo_id, usuario_id):
+    """
+    Remove a associação de um processo-mãe com um acordo. Corrige bug
+    real: o código original chamava `db.session.delete()` mesmo
+    quando a associação não existia (None), o que levanta erro.
+    """
+    assoc = db.session.query(Acordo_ProcMae)\
+                      .filter(Acordo_ProcMae.acordo_id == acordo_id,
+                              Acordo_ProcMae.proc_mae_id == processo_mae_id)\
+                      .first()
+
+    if assoc is None:
+        return False
+
+    db.session.delete(assoc)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'ass')
+
+    return True
+
+
+def processos_filho_do_mae(proc_mae):
+    """
+    Retorna os processos-filho de um processo-mãe, a quantidade e a
+    data do último pagamento mais recente. Corrige bug real: o código
+    original acessava `.qtd_filhos` de um resultado que podia ser None
+    (quando não há nenhum processo-filho para o processo-mãe).
+    """
+    proc_mae_real = proc_mae.replace('_', '/')
+
+    filhos_banco = db.session.query(Processo_Filho.processo,
+                              Processo_Filho.nome,
+                              Processo_Filho.cpf,
+                              Processo_Filho.modalidade,
+                              Processo_Filho.nivel,
+                              Processo_Filho.situ_filho,
+                              Processo_Filho.inic_filho,
+                              Processo_Filho.term_filho,
+                              Processo_Filho.mens_pagas,
+                              Processo_Filho.pago_total,
+                              Processo_Filho.dt_ult_pag)\
+                       .filter(Processo_Filho.proc_mae == proc_mae_real)\
+                       .order_by(Processo_Filho.nome, Processo_Filho.situ_filho)\
+                       .all()
+
+    qtd_filhos_registro = db.session.query(Processo_Filho.proc_mae,
+                                  label('qtd_filhos', func.count(distinct(Processo_Filho.processo))))\
+                           .filter(Processo_Filho.proc_mae == proc_mae_real)\
+                           .group_by(Processo_Filho.proc_mae)\
+                           .first()
+
+    qtd_filhos = qtd_filhos_registro.qtd_filhos if qtd_filhos_registro else 0
+
+    if filhos_banco:
+        ult_pag = [filho.dt_ult_pag for filho in filhos_banco if filho.dt_ult_pag is not None]
+        max_ult_pag = max(ult_pag).strftime("%m/%Y") if ult_pag else 0
+    else:
+        max_ult_pag = 0
+
+    return filhos_banco, qtd_filhos, max_ult_pag
+
+
+def _formata_bolsista(cpf):
+    """Formata uma linha agregada de bolsista (proveniente de query com func.min/max/sum) para exibição."""
+    inicio = cpf.min_inic_filho.strftime("%x") if cpf.min_inic_filho is not None else ''
+    termino = cpf.max_term_filho.strftime("%x") if cpf.max_term_filho is not None else ''
+    pago = locale.currency(cpf.pago, symbol=False, grouping=True) if cpf.pago is not None else ''
+    apagar = locale.currency(cpf.apagar, symbol=False, grouping=True) if cpf.apagar is not None else ''
+
+    return [
+        cpf.nome, cpf.cpf, cpf.modalidade, cpf.nivel, cpf.situ_filho,
+        inicio, termino, cpf.mens_p, pago, cpf.mens_ap, apagar,
+    ]
+
+
+def bolsistas_do_processo_mae(proc_mae):
+    """Retorna os bolsistas (CPFs agregados) de um processo-mãe, formatados para exibição."""
+    proc_mae_real = proc_mae.replace('_', '/')
+
+    cpfs_banco = db.session.query(Processo_Filho.nome,
+                              Processo_Filho.cpf,
+                              Processo_Filho.modalidade,
+                              Processo_Filho.nivel,
+                              Processo_Filho.situ_filho,
+                              label('min_inic_filho', func.min(Processo_Filho.inic_filho)),
+                              label('max_term_filho', func.max(Processo_Filho.term_filho)),
+                              label('mens_p', func.sum(Processo_Filho.mens_pagas)),
+                              label('pago', func.sum(Processo_Filho.pago_total)),
+                              label('mens_ap', func.sum(Processo_Filho.mens_apagar)),
+                              label('apagar', func.sum(Processo_Filho.valor_apagar)))\
+                       .filter(Processo_Filho.proc_mae == proc_mae_real)\
+                       .group_by(Processo_Filho.cpf,
+                                 Processo_Filho.nome,
+                                 Processo_Filho.modalidade,
+                                 Processo_Filho.nivel,
+                                 Processo_Filho.situ_filho)\
+                       .order_by(Processo_Filho.nome).all()
+
+    cpfs = [_formata_bolsista(cpf) for cpf in cpfs_banco]
+
+    return cpfs
+
+
+def processos_filho_do_acordo(acordo_id):
+    """Retorna o acordo, os processos-mãe e os processos-filho vinculados a um acordo."""
+    acordo = db.session.get(Acordo, acordo_id)
+
+    procs_mae = db.session.query(Processo_Mae.proc_mae)\
+                          .join(Acordo_ProcMae, Processo_Mae.id == Acordo_ProcMae.proc_mae_id)\
+                          .filter(Acordo_ProcMae.acordo_id == acordo_id).all()
+
+    l_procs_mae = [p.proc_mae for p in procs_mae]
+
+    filhos_banco = db.session.query(Processo_Filho.processo,
+                                Processo_Filho.nome,
+                                Processo_Filho.cpf,
+                                Processo_Filho.modalidade,
+                                Processo_Filho.nivel,
+                                Processo_Filho.situ_filho,
+                                Processo_Filho.inic_filho,
+                                Processo_Filho.term_filho,
+                                Processo_Filho.mens_pagas,
+                                Processo_Filho.pago_total,
+                                Processo_Filho.dt_ult_pag,
+                                Processo_Filho.valor_apagar,
+                                Processo_Filho.mens_apagar)\
+                        .filter(Processo_Filho.proc_mae.in_(l_procs_mae))\
+                        .order_by(Processo_Filho.situ_filho, Processo_Filho.nome).all()
+
+    if filhos_banco:
+        ult_pag = [filho.dt_ult_pag for filho in filhos_banco if filho.dt_ult_pag is not None]
+        max_ult_pag = max(ult_pag).strftime("%m/%Y") if ult_pag else 0
+    else:
+        max_ult_pag = 0
+
+    return {
+        'acordo': acordo,
+        'qtd_maes': len(procs_mae),
+        'filhos': filhos_banco,
+        'qtd_filhos': len(filhos_banco),
+        'max_ult_pag': max_ult_pag,
+    }
+
+
+def bolsistas_do_acordo(acordo_id):
+    """Retorna os bolsistas (CPFs agregados) de todos os processos-mãe de um acordo."""
+    procs_mae = db.session.query(Processo_Mae.proc_mae)\
+                          .join(Acordo_ProcMae, Processo_Mae.id == Acordo_ProcMae.proc_mae_id)\
+                          .filter(Acordo_ProcMae.acordo_id == acordo_id).all()
+
+    l_procs_mae = [p.proc_mae for p in procs_mae]
+
+    cpfs_banco = db.session.query(Processo_Filho.nome,
+                              Processo_Filho.cpf,
+                              Processo_Filho.modalidade,
+                              Processo_Filho.nivel,
+                              Processo_Filho.situ_filho,
+                              label('min_inic_filho', func.min(Processo_Filho.inic_filho)),
+                              label('max_term_filho', func.max(Processo_Filho.term_filho)),
+                              label('mens_p', func.sum(Processo_Filho.mens_pagas)),
+                              label('pago', func.sum(Processo_Filho.pago_total)),
+                              label('mens_ap', func.sum(Processo_Filho.mens_apagar)),
+                              label('apagar', func.sum(Processo_Filho.valor_apagar)))\
+                       .filter(Processo_Filho.proc_mae.in_(l_procs_mae))\
+                       .group_by(Processo_Filho.cpf,
+                                 Processo_Filho.nome,
+                                 Processo_Filho.modalidade,
+                                 Processo_Filho.nivel,
+                                 Processo_Filho.situ_filho)\
+                       .order_by(Processo_Filho.nome).all()
+
+    cpfs = [_formata_bolsista(cpf) for cpf in cpfs_banco]
+
+    return l_procs_mae, cpfs
