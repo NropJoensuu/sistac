@@ -16,21 +16,20 @@
 from threading import Thread
 from datetime import datetime
 
-from flask import render_template
+from flask import render_template, abort
 from flask_mail import Message
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 import os
 from datetime import date
 
 from fpdf import FPDF
-from sqlalchemy import func
 
 from project import db, mail, app
 from project.models import (
     Log_Auto, Plano_Trabalho, Ativ_Usu, User, Coords, Tipos_Demanda,
     Passos_Tipos, Demanda, Providencia, Despacho, Sistema, DadosSEI,
-    Msgs_Recebidas,
+    Msgs_Recebidas, Acordo, grupo_programa_cnpq,
 )
 
 
@@ -663,3 +662,340 @@ def criar_demanda_de_acordo_convenio(sei_url, tipo, atividade_id, conv_param, ti
         _notificar_necessita_despacho(demanda, titulo, atividade_id, usuario)
 
     return demanda
+
+
+# =============================================================================
+# Demanda (núcleo)
+# =============================================================================
+
+def buscar_dados_demanda(demanda_id):
+    """
+    Retorna os dados completos de uma demanda (com atividade, coordenação
+    e nome do responsável), ou None se não existir. Corrige bug real: o
+    código original não checava se a consulta retornou algo antes de
+    acessar seus atributos (`.data_conclu`, etc.), quebrando com
+    AttributeError para qualquer ID de demanda inexistente.
+    """
+    return db.session.query(Demanda.id, Demanda.programa, Demanda.sei, Demanda.convênio,
+                            Demanda.ano_convênio, Demanda.tipo, Demanda.data, Demanda.user_id,
+                            Demanda.titulo, Demanda.desc, Demanda.necessita_despacho,
+                            Demanda.conclu, Demanda.data_conclu, Demanda.necessita_despacho_cg,
+                            Demanda.urgencia, Demanda.data_env_despacho, Demanda.nota,
+                            Plano_Trabalho.atividade_sigla, User.coord, User.username,
+                            Demanda.data_verific)\
+                     .filter(Demanda.id == demanda_id)\
+                     .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Demanda.programa)\
+                     .outerjoin(User, User.id == Demanda.user_id)\
+                     .first()
+
+
+def providencias_e_despachos(demanda_id):
+    """Retorna as providências e despachos de uma demanda, combinados e ordenados por data (mais recentes primeiro)."""
+    providencias = db.session.query(Providencia.demanda_id, Providencia.texto, Providencia.data,
+                                    Providencia.user_id, User.username.label('username'),
+                                    User.despacha, User.despacha2, Providencia.programada,
+                                    Providencia.passo, Providencia.duracao)\
+                             .outerjoin(User, Providencia.user_id == User.id)\
+                             .filter(Providencia.demanda_id == demanda_id)\
+                             .order_by(Providencia.data.desc()).all()
+
+    despachos = db.session.query(Despacho.demanda_id, Despacho.texto, Despacho.data,
+                                 Despacho.user_id, (User.username + ' - DESPACHO').label('username'),
+                                 User.despacha, User.despacha2, User.despacha0, Despacho.passo)\
+                          .filter_by(demanda_id=demanda_id)\
+                          .outerjoin(User, Despacho.user_id == User.id)\
+                          .order_by(Despacho.data.desc()).all()
+
+    pro_des = providencias + despachos
+    pro_des.sort(key=lambda ordem: ordem.data, reverse=True)
+
+    return pro_des
+
+
+def acordo_relacionado(sei):
+    """Retorna o acordo relacionado a um SEI de demanda, se houver."""
+    return db.session.query(Acordo.id, Acordo.uf, grupo_programa_cnpq.cod_programa)\
+                     .join(grupo_programa_cnpq, grupo_programa_cnpq.id_acordo == Acordo.id)\
+                     .filter(Acordo.sei == sei)\
+                     .first()
+
+
+def tipo_id_da_demanda(tipo):
+    """Retorna o ID de um tipo de demanda a partir do nome do tipo."""
+    return db.session.query(Tipos_Demanda.id).filter(Tipos_Demanda.tipo == tipo).first()
+
+
+def gerar_pdf_demanda(demanda, pro_des):
+    """
+    Gera o PDF com o histórico completo de uma demanda (providências e
+    despachos) em project/static/demanda.pdf (caminho portável).
+    """
+    class PDF(FPDF):
+        def header(self):
+            self.set_font('Arial', 'B', 13)
+            self.set_text_color(127, 127, 127)
+            self.cell(0, 10, 'Relatório de Demanda - gerado em ' + date.today().strftime('%d/%m/%Y'), 1, 1, 'C')
+
+            if demanda.atividade_sigla is None:
+                self.set_text_color(127, 127, 127)
+                self.cell(25, 8, 'Demanda: ', 0, 0)
+                self.set_text_color(0, 0, 0)
+                self.cell(35, 8, str(demanda.id) + ' (' + demanda.coord + ')', 0, 0, 'C')
+                self.set_text_color(0, 0, 0)
+                self.cell(0, 8, ' Atividade não definida', 0, 1)
+            else:
+                self.set_text_color(127, 127, 127)
+                self.cell(25, 8, 'Demanda: ', 0, 0)
+                self.set_text_color(0, 0, 0)
+                self.cell(35, 8, str(demanda.id) + ' (' + demanda.coord + ')', 0, 0, 'C')
+                self.set_text_color(127, 127, 127)
+                self.cell(25, 8, ' Atividade: ', 0, 0)
+                self.set_text_color(0, 0, 0)
+                self.cell(0, 8, demanda.atividade_sigla, 0, 1)
+
+            self.set_text_color(127, 127, 127)
+            self.cell(18, 6, 'Título: ', 0, 0)
+            self.set_text_color(0, 0, 0)
+            titulo = demanda.titulo.encode('latin-1', 'replace').decode('latin-1')
+            tamanho_titulo = self.get_string_width(titulo)
+            self.multi_cell(0, 6, titulo)
+            if tamanho_titulo <= 100:
+                pdf.ln(12)
+            else:
+                pdf.ln(tamanho_titulo / 10)
+
+            self.set_text_color(127, 127, 127)
+            self.cell(12, 8, 'Tipo: ', 0, 0)
+            self.set_text_color(0, 0, 0)
+            self.cell(90, 8, demanda.tipo, 0, 0)
+            self.set_text_color(127, 127, 127)
+            self.cell(12, 8, 'SEI: ', 0, 0)
+            self.set_text_color(0, 0, 0)
+            self.cell(0, 8, demanda.sei, 0, 1)
+
+            self.set_text_color(127, 127, 127)
+            self.cell(16, 8, 'Resp.: ', 0, 0)
+            self.set_text_color(0, 0, 0)
+            self.cell(0, 8, demanda.username, 0, 1)
+
+            if demanda.conclu:
+                self.set_text_color(127, 127, 127)
+                self.cell(25, 8, 'Criada em: ', 0, 0)
+                self.set_text_color(0, 0, 0)
+                self.cell(30, 8, demanda.data.strftime('%d/%m/%Y'), 0, 0)
+                self.set_text_color(127, 127, 127)
+                self.cell(33, 8, 'Finalizada em: ', 0, 0)
+                self.set_text_color(0, 0, 0)
+                x = lambda x: 'N.I.' if x is None else x.strftime('%d/%m/%Y')
+                self.cell(0, 8, x(demanda.data_conclu), 0, 1)
+            else:
+                self.set_text_color(127, 127, 127)
+                self.cell(25, 8, 'Criada em: ', 0, 0)
+                self.set_text_color(0, 0, 0)
+                self.cell(30, 8, demanda.data.strftime('%d/%m/%Y'), 0, 0)
+                self.cell(0, 8, 'Não concluída', 0, 1)
+
+            self.set_text_color(127, 127, 127)
+            self.cell(27, 6, 'Descrição: ', 0, 0)
+            self.set_text_color(0, 0, 0)
+            desc = demanda.desc.encode('latin-1', 'replace').decode('latin-1')
+            tamanho_desc = self.get_string_width(desc)
+            self.multi_cell(0, 6, desc)
+            if tamanho_desc <= 100:
+                pdf.ln(6)
+            else:
+                pdf.ln(tamanho_desc / 12)
+
+            if demanda.necessita_despacho == 1:
+                self.cell(0, 10, 'Aguarda despacho', 0, 1)
+            if demanda.necessita_despacho_cg == 1:
+                self.cell(0, 10, 'Aguarda despacho Coord. Geral ou sup.', 0, 1)
+
+            self.ln(10)
+            self.set_text_color(127, 127, 127)
+            self.cell(0, 10, 'Providências e Despachos', 1, 1, 'C')
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Arial', 'I', 8)
+            self.set_text_color(127, 127, 127)
+            self.cell(0, 10, 'Página ' + str(self.page_no()) + '/{nb}', 0, 0, 'C')
+
+    pdf = PDF()
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    pdf.set_font('Times', '', 12)
+
+    for item in pro_des:
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(50, 10, item.username, 0, 0)
+        pdf.set_text_color(127, 127, 127)
+        pdf.cell(8, 10, 'Em: ', 0, 0)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 10, item.data.strftime('%d/%m/%Y'), 0, 1)
+        texto = item.texto.encode('latin-1', 'replace').decode('latin-1')
+        tamanho_texto = pdf.get_string_width(texto)
+        pdf.multi_cell(0, 5, texto)
+        if tamanho_texto <= 100:
+            pdf.ln(15)
+        else:
+            pdf.ln(tamanho_texto / 10)
+        pdf.dashed_line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y(), 2, 3)
+
+    # Caminho portável (funciona em qualquer ambiente, não só no container Docker)
+    pasta_pdf = os.path.join(app.root_path, 'static', 'demanda.pdf')
+    pdf.output(pasta_pdf)
+
+
+def marcar_verificacao(demanda_id):
+    """Registra a data de verificação de uma demanda."""
+    demanda = Demanda.query.get_or_404(demanda_id)
+    demanda.data_verific = datetime.today()
+    db.session.commit()
+    return demanda
+
+
+def atualizar_demanda(demanda_id, atividade, sei, convenio_data, ano_convenio_data, tipo,
+                       titulo, desc, tipo_despacho, conclu, urgencia, usuario):
+    """
+    Atualiza os dados de uma demanda, incluindo a lógica de mudança de
+    tipo de despacho e de conclusão (que disparam notificações por
+    e-mail quando aplicável).
+
+    Corrige bug real: o código original gravava `demanda.ano_convênio
+    = ''` quando o campo de convênio era deixado em branco — a coluna
+    é Integer, então isso quebrava com DataError ao salvar.
+    """
+    demanda = Demanda.query.get_or_404(demanda_id)
+
+    demanda.programa = atividade
+    demanda.sei = sei
+
+    if convenio_data == '' or convenio_data is None:
+        demanda.convênio = ''
+        demanda.ano_convênio = None
+    else:
+        demanda.convênio = convenio_data
+        demanda.ano_convênio = ano_convenio_data
+
+    demanda.tipo = tipo
+    demanda.titulo = titulo
+    demanda.desc = desc
+
+    if tipo_despacho == '0':
+        demanda.necessita_despacho_cg = 0
+
+    if tipo_despacho == '2':
+        demanda.necessita_despacho_cg = 1
+
+    if tipo_despacho == '1':
+
+        if demanda.necessita_despacho == 0:
+            _notificar_necessita_despacho(demanda, titulo, atividade, usuario)
+
+            demanda.necessita_despacho = 1
+            demanda.data_env_despacho = datetime.now()
+
+        demanda.necessita_despacho_cg = 0
+
+    else:
+        demanda.necessita_despacho = 0
+
+    if conclu != '0':
+
+        demanda.necessita_despacho = 0
+        demanda.necessita_despacho_cg = 0
+
+        if demanda.conclu == '0':
+            demanda.data_conclu = datetime.now()
+            _notificar_demanda_concluida(demanda, titulo, atividade, usuario)
+
+    else:
+        demanda.data_conclu = None
+
+    demanda.conclu = conclu
+    demanda.urgencia = urgencia
+
+    db.session.commit()
+
+    registra_log_auto(usuario.id, demanda_id, 'alt')
+
+    return demanda
+
+
+def transferir_demanda(demanda_id, pessoa_id, usuario):
+    """Transfere uma demanda para outra pessoa, registrando uma providência e notificando por e-mail."""
+    demanda = Demanda.query.get_or_404(demanda_id)
+
+    demanda.user_id = int(pessoa_id)
+    db.session.commit()
+
+    registra_log_auto(usuario.id, demanda_id, 'tra')
+
+    recebedor = db.session.query(User.username, User.email).filter(User.id == int(pessoa_id)).first()
+
+    providencia = Providencia(
+        demanda_id=demanda_id, data=datetime.now(),
+        texto='DEMANDA TRANSFERIDA para ' + recebedor.username + '!    ',
+        user_id=usuario.id, duracao=5, programada=0, passo='',
+    )
+    db.session.add(providencia)
+    db.session.commit()
+
+    sistema = db.session.query(Sistema.nome_sistema).first()
+
+    destino = [recebedor.email, usuario.email]
+
+    html = render_template('email_demanda_transf.html', demanda=demanda_id, user=usuario.username,
+                            titulo=demanda.titulo, receb=recebedor.username, sistema=sistema.nome_sistema)
+
+    send_email('A demanda ' + str(demanda_id) + ' foi transferida para você!', destino, '', html)
+
+    msg = Msgs_Recebidas(user_id=demanda.user_id, data_hora=datetime.now(), demanda_id=demanda_id,
+                         msg='A demanda foi transferida para você!')
+    db.session.add(msg)
+    db.session.commit()
+
+    return demanda
+
+
+def avocar_demanda_service(demanda_id, usuario):
+    """Avoca (assume para si) uma demanda de outra pessoa, registrando uma providência."""
+    demanda = Demanda.query.get_or_404(demanda_id)
+
+    providencia = Providencia(
+        demanda_id=demanda_id, data=datetime.now(),
+        texto='DEMANDA AVOCADA! Resp. anterior: ' + demanda.author.username + '.',
+        user_id=usuario.id, duracao=5, programada=0, passo='',
+    )
+    db.session.add(providencia)
+    db.session.commit()
+
+    demanda.user_id = usuario.id
+    db.session.commit()
+
+    registra_log_auto(usuario.id, demanda_id, 'avo')
+
+    return demanda
+
+
+def alterar_data_conclusao(demanda_id, nova_data, usuario_id):
+    """Permite que o admin altere manualmente a data de conclusão de uma demanda."""
+    demanda = Demanda.query.get_or_404(demanda_id)
+
+    demanda.data_conclu = nova_data
+    db.session.commit()
+
+    registra_log_auto(usuario_id, demanda_id, 'dat')
+
+    return demanda
+
+
+def excluir_demanda(demanda_id, usuario_id):
+    """Remove uma demanda."""
+    demanda = Demanda.query.get_or_404(demanda_id)
+
+    db.session.delete(demanda)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, demanda_id, 'del')

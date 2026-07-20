@@ -550,7 +550,6 @@ def confirma_acordo_convenio_demanda(prog,sei,conv,ano,tipo,mensagem):
 
 
 #lendo uma demanda
-#lendo uma demanda
 
 @demandas.route('/demanda/<int:demanda_id>',methods=['GET','POST'])
 def demanda(demanda_id):
@@ -561,61 +560,12 @@ def demanda(demanda_id):
        +---------------------------------------------------------------------------------+
     """
 
-    demanda = db.session.query(Demanda.id,
-                                Demanda.programa,
-                                Demanda.sei,
-                                Demanda.convênio,
-                                Demanda.ano_convênio,
-                                Demanda.tipo,
-                                Demanda.data,
-                                Demanda.user_id,
-                                Demanda.titulo,
-                                Demanda.desc,
-                                Demanda.necessita_despacho,
-                                Demanda.conclu,
-                                Demanda.data_conclu,
-                                Demanda.necessita_despacho_cg,
-                                Demanda.urgencia,
-                                Demanda.data_env_despacho,
-                                Demanda.nota,
-                                Plano_Trabalho.atividade_sigla,
-                                User.coord,
-                                User.username,
-                                Demanda.data_verific)\
-                         .filter(Demanda.id == demanda_id)\
-                         .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Demanda.programa)\
-                         .outerjoin(User, User.id == Demanda.user_id)\
-                         .first()
+    demanda = services.buscar_dados_demanda(demanda_id)
 
-    providencias = db.session.query(Providencia.demanda_id,
-                                    Providencia.texto,
-                                    Providencia.data,
-                                    Providencia.user_id,
-                                    label('username',User.username),
-                                    User.despacha,
-                                    User.despacha2,
-                                    Providencia.programada,
-                                    Providencia.passo,
-                                    Providencia.duracao)\
-                                    .outerjoin(User, Providencia.user_id == User.id)\
-                                    .filter(Providencia.demanda_id == demanda_id)\
-                                    .order_by(Providencia.data.desc()).all()
+    if demanda is None:
+        abort(404)
 
-    despachos = db.session.query(Despacho.demanda_id,
-                                 Despacho.texto,
-                                 Despacho.data,
-                                 Despacho.user_id,
-                                 label('username',User.username +' - DESPACHO'),
-                                 User.despacha,
-                                 User.despacha2,
-                                 User.despacha0,
-                                 Despacho.passo)\
-                                .filter_by(demanda_id=demanda_id)\
-                                .outerjoin(User, Despacho.user_id == User.id)\
-                                .order_by(Despacho.data.desc()).all()
-
-    pro_des = providencias + despachos
-    pro_des.sort(key=lambda ordem: ordem.data,reverse=True)
+    pro_des = services.providencias_e_despachos(demanda_id)
 
     if current_user.is_anonymous:
         leitor_despacha = 'False'
@@ -632,10 +582,7 @@ def demanda(demanda_id):
 
     # verifica se a demanda tem relação com um acordo
 
-    acordo = db.session.query(Acordo.id, Acordo.uf, grupo_programa_cnpq.cod_programa)\
-                       .join(grupo_programa_cnpq,grupo_programa_cnpq.id_acordo==Acordo.id)\
-                       .filter(Acordo.sei == demanda.sei)\
-                       .first()
+    acordo = services.acordo_relacionado(demanda.sei)
     if acordo != None:
         acordo_id = acordo.id
         lista = 'uf'+str(acordo.uf)+str(acordo.cod_programa)
@@ -644,7 +591,7 @@ def demanda(demanda_id):
         lista = ''
 
     # resgata tipo_id do tipo da demanda para resgatar os passos
-    tipo_demanda = db.session.query(Tipos_Demanda.id).filter(Tipos_Demanda.tipo == demanda.tipo).first()
+    tipo_demanda = services.tipo_id_da_demanda(demanda.tipo)
 
     # gera um pdf com todo o histórico da demanda
 
@@ -652,133 +599,7 @@ def demanda(demanda_id):
 
     if form.validate_on_submit():
 
-        class PDF(FPDF):
-            # cabeçalho com dados da demanda
-            def header(self):
-                # Logo
-                # self.image('logo_pb.png', 10, 8, 33)
-                self.set_font('Arial', 'B', 13)
-                self.set_text_color(127,127,127)
-                self.cell(0, 10, 'Relatório de Demanda - gerado em '+date.today().strftime('%d/%m/%Y'), 1, 1,'C')
-                # Nº da demanda, coordenação e atividade
-                if demanda.atividade_sigla == None:
-                    self.set_text_color(127,127,127)
-                    self.cell(25, 8, 'Demanda: ', 0, 0)
-                    self.set_text_color(0,0,0)
-                    self.cell(35, 8, str(demanda.id)+' ('+demanda.coord+')', 0, 0,'C')
-                    self.set_text_color(0,0,0)
-                    self.cell(0, 8, ' Atividade não definida', 0, 1)
-                else:
-                    self.set_text_color(127,127,127)
-                    self.cell(25, 8, 'Demanda: ', 0, 0)
-                    self.set_text_color(0,0,0)
-                    self.cell(35, 8, str(demanda.id)+' ('+demanda.coord+')', 0, 0,'C')
-                    self.set_text_color(127,127,127)
-                    self.cell(25, 8, ' Atividade: ', 0, 0)
-                    self.set_text_color(0,0,0)
-                    self.cell(0, 8, demanda.atividade_sigla, 0, 1)
-                # título da demanda
-                self.set_text_color(127,127,127)
-                self.cell(18, 6, 'Título: ', 0, 0)
-                self.set_text_color(0,0,0)
-                titulo = demanda.titulo.encode('latin-1', 'replace').decode('latin-1')
-                tamanho_titulo = self.get_string_width(titulo)
-                self.multi_cell(0, 6, titulo)
-                if tamanho_titulo <= 100:
-                    pdf.ln(12)
-                else:
-                    pdf.ln(tamanho_titulo/10)
-                # tipo e SEI
-                self.set_text_color(127,127,127)
-                self.cell(12, 8, 'Tipo: ', 0, 0)
-                self.set_text_color(0,0,0)
-                self.cell(90, 8, demanda.tipo, 0, 0)
-                self.set_text_color(127,127,127)
-                self.cell(12, 8, 'SEI: ', 0, 0)
-                self.set_text_color(0,0,0)
-                self.cell(0, 8, demanda.sei, 0, 1)
-                # responsável
-                self.set_text_color(127,127,127)
-                self.cell(16, 8, 'Resp.: ', 0, 0)
-                self.set_text_color(0,0,0)
-                self.cell(0, 8, demanda.username, 0, 1)
-                # datas
-                if demanda.conclu:
-                    self.set_text_color(127,127,127)
-                    self.cell(25, 8, 'Criada em: ', 0, 0)
-                    self.set_text_color(0,0,0)
-                    self.cell(30, 8, demanda.data.strftime('%d/%m/%Y'), 0, 0)
-                    self.set_text_color(127,127,127)
-                    self.cell(33, 8, 'Finalizada em: ', 0, 0)
-                    self.set_text_color(0,0,0)
-                    x = lambda x: 'N.I.' if x == None else x.strftime('%d/%m/%Y')
-                    self.cell(0, 8, x(demanda.data_conclu), 0, 1)
-                else:
-                    self.set_text_color(127,127,127)
-                    self.cell(25, 8, 'Criada em: ', 0, 0)
-                    self.set_text_color(0,0,0)
-                    self.cell(30, 8, demanda.data.strftime('%d/%m/%Y'), 0, 0)
-                    self.cell(0, 8,'Não concluída', 0, 1)
-                # descrição
-                self.set_text_color(127,127,127)
-                self.cell(27, 6, 'Descrição: ', 0, 0)
-                self.set_text_color(0,0,0)
-                desc = demanda.desc.encode('latin-1', 'replace').decode('latin-1')
-                tamanho_desc = self.get_string_width(desc)
-                self.multi_cell(0, 6, desc)
-                if tamanho_desc <= 100:
-                    pdf.ln(6)
-                else:
-                    pdf.ln(tamanho_desc/12)
-                # se necessita despachos
-                if demanda.necessita_despacho == 1:
-                    self.cell(0, 10, 'Aguarda despacho', 0, 1)
-                if demanda.necessita_despacho_cg == 1:
-                    self.cell(0, 10, 'Aguarda despacho Coord. Geral ou sup.', 0, 1)
-                # Line break
-                self.ln(10)
-                self.set_text_color(127,127,127)
-                self.cell(0, 10, 'Providências e Despachos', 1, 1,'C')
-
-            # Rodape da página
-            def footer(self):
-                # Posicionado a 1,5 cm do final da página
-                self.set_y(-15)
-                # Arial italic 8 cinza
-                self.set_font('Arial', 'I', 8)
-                self.set_text_color(127,127,127)
-                # Numeração de página
-                self.cell(0, 10, 'Página ' + str(self.page_no()) + '/{nb}', 0, 0, 'C')
-
-        # Instanciando a classe herdada
-        pdf = PDF()
-        pdf.alias_nb_pages()
-        pdf.add_page()
-        pdf.set_font('Times', '', 12)
-        # Providêcias e Despachos: responsável, data e descrição
-        for item in pro_des:
-            pdf.set_text_color(0,0,0)
-            pdf.cell(50, 10, item.username, 0, 0)
-            pdf.set_text_color(127,127,127)
-            pdf.cell(8, 10, 'Em: ', 0, 0)
-            pdf.set_text_color(0,0,0)
-            pdf.cell(0, 10, item.data.strftime('%d/%m/%Y'), 0, 1)
-            texto = item.texto.encode('latin-1', 'replace').decode('latin-1')
-            tamanho_texto = pdf.get_string_width(texto)
-            pdf.multi_cell(0, 5, texto)
-            if tamanho_texto <= 100:
-                pdf.ln(15)
-            else:
-                pdf.ln(tamanho_texto/10)
-            pdf.dashed_line(pdf.get_x(), pdf.get_y(), pdf.get_x()+190, pdf.get_y(), 2, 3)
-
-
-        pasta_pdf = os.path.normpath('/app/project/static/demanda.pdf')
-
-        pdf.output(pasta_pdf, 'F')
-
-        # o comandinho mágico que permite fazer o download de um arquivo
-        send_from_directory('/app/project/static', 'demanda.pdf')
+        services.gerar_pdf_demanda(demanda, pro_des)
 
         return redirect(url_for('static', filename='demanda.pdf'))
 
@@ -816,15 +637,12 @@ def verifica(demanda_id):
         +----------------------------------------------------------------------+
     """
 
-    demanda = Demanda.query.get_or_404(demanda_id)
-
-    demanda.data_verific = datetime.today()
-
-    db.session.commit()
+    services.marcar_verificacao(demanda_id)
 
     return redirect(url_for('demandas.demanda',demanda_id=demanda_id))
 
 
+#vendo ultimas demandas
 #vendo ultimas demandas
 
 @demandas.route('/demandas')
@@ -1168,7 +986,7 @@ def update_demanda(demanda_id):
     +---------------------------------------------------------------------------------------+
     """
     demanda = Demanda.query.get_or_404(demanda_id)
-    sistema = db.session.query(Sistema.funcionalidade_conv, Sistema.funcionalidade_acordo).first()
+    sistema = services.dados_funcionalidade_sistema()
 
     if demanda.author != current_user:
         abort(403)
@@ -1176,156 +994,27 @@ def update_demanda(demanda_id):
     if current_user.ativo == 0:
         abort(403)
 
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    # o choices do campo tipo e do campo atividade são definidos aqui e não no form
-    tipos = db.session.query(Tipos_Demanda.tipo)\
-                      .filter(Tipos_Demanda.unidade.in_(l_unid))\
-                      .order_by(Tipos_Demanda.tipo)\
-                      .all()
-    lista_tipos = [(t.tipo,t.tipo) for t in tipos]
-    lista_tipos.insert(0,('',''))
-
-    atividades = db.session.query(Plano_Trabalho.atividade_sigla, Plano_Trabalho.id)\
-                           .filter(Plano_Trabalho.unidade.in_(l_unid))\
-                           .order_by(Plano_Trabalho.atividade_sigla)\
-                           .all()
-    lista_atividades = [(str(a.id),a.atividade_sigla) for a in atividades]
-    lista_atividades.insert(0,('',''))
-
     form = Demanda_ATU_Form()
 
-    form.tipo.choices = lista_tipos
-    form.atividade.choices = lista_atividades
+    form.tipo.choices = services.tipos_choices(current_user.coord)
+    form.atividade.choices = services.atividades_choices(current_user.coord)
 
     if form.validate_on_submit():
 
-        demanda.programa              = form.atividade.data
-        demanda.sei                   = form.sei.data
-
-        if form.convênio.data == ''  or form.convênio.data == None:
-            demanda.convênio = ''
-            demanda.ano_convênio  = ''
-        else:
-            demanda.convênio = form.convênio.data
-            demanda.ano_convênio = form.ano_convênio.data
-
-        demanda.tipo                  = form.tipo.data
-        demanda.titulo                = form.titulo.data
-        demanda.desc                  = form.desc.data
-
-        if form.tipo_despacho.data == '0':
-            demanda.necessita_despacho_cg = 0
-
-        if form.tipo_despacho.data == '2':
-            demanda.necessita_despacho_cg = 1
-
-        if form.tipo_despacho.data == '1':
-
-            # enviar e-mail para chefes sobre necessidade de despacho
-            if demanda.necessita_despacho == 0:
-
-                chefes_emails = db.session.query(User.email,User.id)\
-                                          .filter(or_(User.despacha == 1,User.despacha0 == 1),
-                                                  User.coord == current_user.coord)
-
-                destino = []
-                for email in chefes_emails:
-                    destino.append(email[0])
-                destino.append(current_user.email)
-
-                if len(destino) > 1:
-
-                    sistema = db.session.query(Sistema.nome_sistema).first()
-
-                    html = render_template('email_pede_despacho.html',demanda=demanda_id,user=current_user.username,
-                                            titulo=form.titulo.data,sistema=sistema.nome_sistema)
-
-                    pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==form.atividade.data).first()
-
-                    send_email('Demanda ' + str(demanda_id) + ' requer despacho (' + pt.atividade_sigla + ')', destino,'', html)
-
-                    for user in chefes_emails:
-                        msg = Msgs_Recebidas(user_id    = user.id,
-                                             data_hora  = datetime.now(),
-                                             demanda_id = demanda_id,
-                                             msg        = 'Chefia, a demanda está pedindo um despacho!')
-                        db.session.add(msg)
-
-                        msg = Msgs_Recebidas(user_id    = current_user.id,
-                                             data_hora  = datetime.now(),
-                                             demanda_id = demanda_id,
-                                             msg        = 'Você marcou a opção -Necessita despacho?- na demanda!')
-                        db.session.add(msg)
-
-                    db.session.commit()
-
-                demanda.necessita_despacho    = 1
-                demanda.data_env_despacho     = datetime.now()
-
-            demanda.necessita_despacho_cg = 0
-
-        else:
-
-            demanda.necessita_despacho    = 0
-
-        if form.conclu.data != '0':
-
-            demanda.necessita_despacho    = 0
-            demanda.necessita_despacho_cg = 0
-
-            if demanda.conclu == '0':
-
-                demanda.data_conclu = datetime.now()
-
-                # enviar e-mail para chefes sobre demanda concluida
-                chefes_emails = db.session.query(User.email)\
-                                          .filter(or_(User.despacha == 1,User.despacha0 == 1),
-                                                  User.coord == current_user.coord)
-
-                destino = []
-                for email in chefes_emails:
-                    destino.append(email[0])
-                destino.append(current_user.email)
-
-                if len(destino) > 1:
-
-                    sistema = db.session.query(Sistema.nome_sistema).first()
-
-                    html = render_template('email_demanda_conclu.html',demanda=demanda_id,user=current_user.username,
-                                            titulo=form.titulo.data,sistema=sistema.nome_sistema)
-
-                    pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==form.atividade.data).first()
-
-                    send_email('Demanda ' + str(demanda_id) + ' foi concluída (' + pt.atividade_sigla + ')', destino,'', html)
-
-                    msg = Msgs_Recebidas(user_id    = demanda.user_id,
-                                         data_hora  = datetime.now(),
-                                         demanda_id = demanda_id,
-                                         msg        = 'A demanda foi concluída!')
-
-                    db.session.add(msg)
-                    db.session.commit()
-
-        else:
-            demanda.data_conclu = None
-
-        demanda.conclu                = form.conclu.data
-
-        demanda.urgencia              = form.urgencia.data
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,demanda_id,'alt')
+        services.atualizar_demanda(
+            demanda_id=demanda_id,
+            atividade=form.atividade.data,
+            sei=form.sei.data,
+            convenio_data=form.convênio.data,
+            ano_convenio_data=form.ano_convênio.data,
+            tipo=form.tipo.data,
+            titulo=form.titulo.data,
+            desc=form.desc.data,
+            tipo_despacho=form.tipo_despacho.data,
+            conclu=form.conclu.data,
+            urgencia=form.urgencia.data,
+            usuario=current_user,
+        )
 
         flash ('Demanda atualizada!','sucesso')
         return redirect(url_for('demandas.demanda',demanda_id=demanda.id))
@@ -1384,43 +1073,7 @@ def transfer_demanda(demanda_id):
 
     if form.validate_on_submit():
 
-        demanda.user_id   = int(form.pessoa.data)
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,demanda_id,'tra')
-
-        recebedor = db.session.query(User.username,User.email).filter(User.id==int(form.pessoa.data)).first()
-
-        providencia = Providencia(demanda_id = demanda_id,
-                                  data       = datetime.now(),
-                                  texto      = 'DEMANDA TRANSFERIDA para '+recebedor.username+'!    ',
-                                  user_id    = current_user.id,
-                                  duracao    = 5,
-                                  programada = 0,
-                                  passo      = '')
-
-        db.session.add(providencia)
-        db.session.commit()
-
-        sistema = db.session.query(Sistema.nome_sistema).first()
-
-        destino = []
-        destino.append(recebedor.email)
-        destino.append(current_user.email)
-
-        html = render_template('email_demanda_transf.html',demanda=demanda_id,user=current_user.username,
-                                titulo=demanda.titulo,receb=recebedor.username,sistema=sistema.nome_sistema)
-
-        send_email('A demanda ' + str(demanda_id) + ' foi transferida para você!', destino,'', html)
-
-        msg = Msgs_Recebidas(user_id    = demanda.user_id,
-                             data_hora  = datetime.now(),
-                             demanda_id = demanda_id,
-                             msg        = 'A demanda foi transferida para você!')
-
-        db.session.add(msg)
-        db.session.commit()
+        services.transferir_demanda(demanda_id, form.pessoa.data, current_user)
 
         flash ('Demanda transferida!','sucesso')
 
@@ -1446,23 +1099,7 @@ def avocar_demanda(demanda_id):
     if current_user.ativo == 0:
         abort(403)
 
-    demanda = Demanda.query.get_or_404(demanda_id)
-
-    providencia = Providencia(demanda_id = demanda_id,
-                              data       = datetime.now(),
-                              texto      = 'DEMANDA AVOCADA! Resp. anterior: ' + demanda.author.username + '.',
-                              user_id    = current_user.id,
-                              duracao    = 5,
-                              programada = 0,
-                              passo      = '')
-
-    db.session.add(providencia)
-    db.session.commit()
-
-    demanda.user_id   = current_user.id
-    db.session.commit()
-
-    registra_log_auto(current_user.id,demanda_id,'avo')
+    demanda = services.avocar_demanda_service(demanda_id, current_user)
 
     flash ('Demanda avocada!','sucesso')
 
@@ -1494,11 +1131,7 @@ def admin_altera_demanda(demanda_id):
 
     if form.validate_on_submit():
 
-        demanda.data_conclu = form.data_conclu.data
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,demanda_id,'dat')
+        services.alterar_data_conclusao(demanda_id, form.data_conclu.data, current_user.id)
 
         flash ('Data de conclusão alterada!','sucesso')
 
@@ -1530,16 +1163,14 @@ def delete_demanda(demanda_id):
     if demanda.author != current_user:
         abort(403)
 
-    db.session.delete(demanda)
-    db.session.commit()
-
-    registra_log_auto(current_user.id,demanda_id,'del')
+    services.excluir_demanda(demanda_id, current_user.id)
 
     flash ('Demanda excluída!','sucesso')
 
     return redirect(url_for('demandas.list_demandas'))
 
 
+# procurando uma demanda
 # procurando uma demanda
 
 @demandas.route('/pesquisa', methods=['GET','POST'])
