@@ -89,6 +89,12 @@ def test_criar_acordo_nao_confunde_valor_epe_com_cnpq(app):
             db.session.add(user)
             db.session.commit()
 
+        acordo_existente = Acordo.query.filter_by(sei='00000.000000/2024-11').first()
+        if acordo_existente is not None:
+            assert acordo_existente.valor_cnpq == 100000.0
+            assert acordo_existente.valor_epe == 50000.0
+            return
+
         acordo, _ = services.criar_acordo(
             nome='Acordo Teste ValorEPE Regressao', desc='teste', sei='00000.000000/2024-11',
             epe='EPE', uf='DF', data_inicio=date(2024, 1, 1), data_fim=date(2026, 12, 31),

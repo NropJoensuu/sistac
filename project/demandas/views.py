@@ -81,60 +81,16 @@ from calendar import monthrange
 demandas = Blueprint("demandas",__name__,
                         template_folder='templates/demandas')
 
-# helper function para envio de email em outra thread
-def send_async_email(msg):
-    """+--------------------------------------------------------------------------------------+
-       |Executa o envio de e-mails de forma assíncrona.                                       |
-       +--------------------------------------------------------------------------------------+
-    """
-    with app.app_context():
-        mail.send(msg)
-
-# helper function para enviar e-mail
-def send_email(subject, recipients, text_body, html_body):
-    """+--------------------------------------------------------------------------------------+
-       |Envia e-mails.                                                                        |
-       +--------------------------------------------------------------------------------------+
-    """
-    msg = Message(subject, recipients=recipients)
-    msg.body = text_body
-    msg.html = html_body
-    thr = Thread(target=send_async_email, args=[msg])
-    thr.start()
-
-# função para registrar comits no log
-def registra_log_auto(user_id,demanda_id,tipo_registro,atividade=None,duracao=0):
-    """
-    +---------------------------------------------------------------------------------------+
-    |Função que registra ação do usuário na tabela log_auto.                                |
-    |INPUT: id usúario, id demanda, tipo de registro                                        |
-    |Os tipos de registro estão na tabela log_desc.                                         |
-    +---------------------------------------------------------------------------------------+
-    """
-    # BUG CORRIGIDO: user_id=None sempre quebrava com NotNullViolation
-    # (a coluna log_auto.user_id não aceita nulo). Isso acontecia em
-    # vários pontos do sistema (agendamentos numa instalação nova, sem
-    # nenhum log anterior para identificar o usuário responsável).
-    # Pular o registro nesse caso é estritamente mais seguro do que
-    # quebrar — não há regressão possível, já que antes sempre crashava.
-    if user_id is None:
-        return
-
-    reg_log = Log_Auto(data_hora     = datetime.now(),
-                       user_id       = user_id,
-                       demanda_id    = demanda_id,
-                       tipo_registro = tipo_registro,
-                       atividade     = atividade,
-                       duracao       = duracao)
-    db.session.add(reg_log)
-    db.session.commit()
-
-    return
+from project.demandas import services
+# Re-exportado para não quebrar os 7+ módulos que já fazem
+# "from project.demandas.views import registra_log_auto".
+from project.demandas.services import registra_log_auto, send_email, send_async_email
 
 #
 ## lista plano de trabalho
 
 @demandas.route('/plano_trabalho')
+@login_required
 def plano_trabalho():
     """
     +---------------------------------------------------------------------------------------+
@@ -143,48 +99,9 @@ def plano_trabalho():
     +---------------------------------------------------------------------------------------+
     """
 
-    unidade = current_user.coord
+    atividades = services.listar_plano_trabalho(current_user.coord)
 
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    user_titular = db.session.query(Ativ_Usu.atividade_id,
-                                    User.username)\
-                             .join(User, User.id == Ativ_Usu.user_id)\
-                             .filter(Ativ_Usu.nivel == 'Titular')\
-                             .subquery()
-    #
-    user_suplente = db.session.query(Ativ_Usu.atividade_id,
-                                    User.username)\
-                              .join(User, User.id == Ativ_Usu.user_id)\
-                              .filter(Ativ_Usu.nivel == 'Suplente')\
-                              .subquery()
-
-    atividades = db.session.query(Plano_Trabalho.id,
-                                  Plano_Trabalho.atividade_sigla,
-                                  Plano_Trabalho.atividade_desc,
-                                  Plano_Trabalho.natureza,
-                                  Plano_Trabalho.meta,
-                                  label('titular',user_titular.c.username),
-                                  label('suplente',user_suplente.c.username),
-                                  Plano_Trabalho.situa,
-                                  Plano_Trabalho.unidade)\
-                           .outerjoin(user_titular, Plano_Trabalho.id == user_titular.c.atividade_id)\
-                           .outerjoin(user_suplente, Plano_Trabalho.id == user_suplente.c.atividade_id)\
-                           .filter(Plano_Trabalho.unidade.in_(l_unid))\
-                           .order_by(Plano_Trabalho.atividade_sigla)\
-                           .all()
-
-    quantidade = len(atividades)
-
-
-    return render_template('plano_trabalho.html', atividades = atividades, quantidade=quantidade)
+    return render_template('plano_trabalho.html', atividades = atividades, quantidade=len(atividades))
 
 #
 ### atualiza atividade no plano de trabalho
@@ -200,38 +117,24 @@ def update_plano_trabalho(id):
     +----------------------------------------------------------------------------------------------+
     """
 
-    atividade = Plano_Trabalho.query.get_or_404(id)
-
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    lista_unids = [(u,u) for u in l_unid]
-    lista_unids.insert(0,('',''))
+    atividade = services.buscar_atividade(id)
 
     form = Plano_TrabalhoForm()
 
-    form.unidade.choices = lista_unids
+    form.unidade.choices = services.unidades_choices(current_user.coord)
 
     if form.validate_on_submit():
 
-        atividade.atividade_sigla = form.atividade_sigla.data
-        atividade.atividade_desc  = form.atividade_desc.data
-        atividade.natureza        = form.natureza.data
-        atividade.meta            = form.horas_semana.data
-        atividade.situa           = form.situa.data
-        atividade.unidade         = form.unidade.data
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'ipt')
+        services.atualizar_atividade(
+            id=id,
+            atividade_sigla=form.atividade_sigla.data,
+            atividade_desc=form.atividade_desc.data,
+            natureza=form.natureza.data,
+            meta=form.horas_semana.data,
+            situa=form.situa.data,
+            unidade=form.unidade.data,
+            usuario_id=current_user.id,
+        )
 
         flash('Atividade atualizada no Plano de Trabalho!')
         return redirect(url_for('demandas.plano_trabalho'))
@@ -258,35 +161,21 @@ def cria_atividade():
     +---------------------------------------------------------------------------------------+
     """
 
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    lista_unids = [(u,u) for u in l_unid]
-    lista_unids.insert(0,('',''))
-
     form = Plano_TrabalhoForm()
 
-    form.unidade.choices = lista_unids
+    form.unidade.choices = services.unidades_choices(current_user.coord)
 
     if form.validate_on_submit():
-        atividade = Plano_Trabalho(atividade_sigla = form.atividade_sigla.data,
-                                   atividade_desc  = form.atividade_desc.data,
-                                   natureza        = form.natureza.data,
-                                   meta            = form.horas_semana.data,
-                                   situa           = form.situa.data,
-                                   unidade         = form.unidade.data)
-        db.session.add(atividade)
-        db.session.commit()
 
-        registra_log_auto(current_user.id,None,'ipt')
+        services.criar_atividade(
+            atividade_sigla=form.atividade_sigla.data,
+            atividade_desc=form.atividade_desc.data,
+            natureza=form.natureza.data,
+            meta=form.horas_semana.data,
+            situa=form.situa.data,
+            unidade=form.unidade.data,
+            usuario_id=current_user.id,
+        )
 
         flash('Atividade inserida no plano de trabalho!')
         return redirect(url_for('demandas.plano_trabalho'))
@@ -308,12 +197,7 @@ def delete_atividade(atividade_id):
     if current_user.ativo == 0 or (current_user.despacha0 == 0 and current_user.despacha == 0 and current_user.despacha2 == 0):
         abort(403)
 
-    atividade = Plano_Trabalho.query.get_or_404(atividade_id)
-
-    db.session.delete(atividade)
-    db.session.commit()
-
-    registra_log_auto(current_user.id,None,'xpt')
+    services.excluir_atividade(atividade_id, current_user.id)
 
     flash ('Atividade excluída!','sucesso')
 
