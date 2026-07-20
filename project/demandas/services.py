@@ -16,7 +16,9 @@
 from threading import Thread
 from datetime import datetime
 
+from flask import render_template
 from flask_mail import Message
+from sqlalchemy import or_
 
 import os
 from datetime import date
@@ -27,7 +29,8 @@ from sqlalchemy import func
 from project import db, mail, app
 from project.models import (
     Log_Auto, Plano_Trabalho, Ativ_Usu, User, Coords, Tipos_Demanda,
-    Passos_Tipos, Demanda, Providencia, Despacho,
+    Passos_Tipos, Demanda, Providencia, Despacho, Sistema, DadosSEI,
+    Msgs_Recebidas,
 )
 
 
@@ -429,3 +432,234 @@ def listar_passos_tipo(tipo_id):
                            .order_by(Passos_Tipos.ordem).all()
 
     return tipo, passos, quantidade
+
+
+# =============================================================================
+# Criação de demanda
+# =============================================================================
+
+def tipos_choices(unidade):
+    """Retorna a lista de tipos de demanda da unidade (e filhas), formatada para um SelectField."""
+    l_unid = _unidades_hierarquia(unidade)
+
+    tipos = db.session.query(Tipos_Demanda.tipo)\
+                      .filter(Tipos_Demanda.unidade.in_(l_unid))\
+                      .order_by(Tipos_Demanda.tipo)\
+                      .all()
+
+    lista_tipos = [(t.tipo, t.tipo) for t in tipos]
+    lista_tipos.insert(0, ('', ''))
+    return lista_tipos
+
+
+def atividades_choices(unidade):
+    """Retorna a lista de atividades do plano de trabalho da unidade (e filhas), formatada para um SelectField."""
+    l_unid = _unidades_hierarquia(unidade)
+
+    atividades = db.session.query(Plano_Trabalho.id, Plano_Trabalho.atividade_sigla)\
+                           .filter(Plano_Trabalho.unidade.in_(l_unid))\
+                           .order_by(Plano_Trabalho.atividade_sigla).all()
+
+    lista_atividades = [(str(a.id), a.atividade_sigla) for a in atividades]
+    lista_atividades.insert(0, ('', ''))
+    return lista_atividades
+
+
+def verificar_demanda_duplicada(sei, tipo):
+    """
+    Verifica se já existe uma demanda não concluída para o mesmo SEI e
+    tipo. Retorna 'OK' se não houver, ou 'KO<id>' com o ID da demanda
+    existente.
+    """
+    verif_demanda = db.session.query(Demanda)\
+                              .filter(Demanda.sei == sei, Demanda.tipo == tipo, Demanda.conclu == '0')\
+                              .first()
+
+    if verif_demanda is None:
+        return 'OK'
+    return 'KO' + str(verif_demanda.id)
+
+
+def formata_sei_para_url(sei):
+    """Converte um SEI no formato 'NNNNN.NNNNNN/AAAA-DD' para o formato de URL 'NNNNN.NNNNNN_AAAA-DD'."""
+    if '/' in str(sei):
+        return str(sei).split('/')[0] + '_' + str(sei).split('/')[1]
+    return str(sei)
+
+
+def formata_sei_de_url(sei_url):
+    """Converte um SEI do formato de URL de volta para o formato normal."""
+    return str(sei_url).split('_')[0] + '/' + str(sei_url).split('_')[1]
+
+
+def dados_funcionalidade_sistema():
+    """Retorna as flags de funcionalidade de convênio/acordo do sistema."""
+    return db.session.query(Sistema.funcionalidade_conv, Sistema.funcionalidade_acordo).first()
+
+
+def atividade_id_por_programa(prog):
+    """
+    Busca o ID da atividade do plano de trabalho pela sigla informada
+    (prog). Se não encontrar, usa a atividade 'Diversos' como fallback.
+    """
+    atividade = db.session.query(Plano_Trabalho.id).filter(Plano_Trabalho.atividade_sigla == prog).first()
+
+    if atividade is None:
+        atividade = db.session.query(Plano_Trabalho.id).filter(Plano_Trabalho.atividade_sigla == "Diversos").first()
+
+    return atividade
+
+
+def _notificar_demanda_concluida(demanda, titulo, atividade_id, usuario):
+    """Notifica os chefes da coordenação de que uma demanda foi criada já concluída."""
+    chefes_emails = db.session.query(User.email)\
+                              .filter(or_(User.despacha == 1, User.despacha0 == 1),
+                                      User.coord == usuario.coord)
+
+    destino = [e[0] for e in chefes_emails]
+    destino.append(usuario.email)
+
+    if len(destino) > 1:
+        sistema = db.session.query(Sistema.nome_sistema).first()
+
+        html = render_template('email_demanda_conclu.html', demanda=demanda.id, user=usuario.username,
+                                titulo=titulo, sistema=sistema.nome_sistema)
+
+        pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id == atividade_id).first()
+
+        send_email('Demanda ' + str(demanda.id) + ' foi concluída (' + pt.atividade_sigla + ')', destino, '', html)
+
+        msg = Msgs_Recebidas(user_id=demanda.user_id, data_hora=datetime.now(),
+                             demanda_id=demanda.id, msg='A demanda foi concluída!')
+        db.session.add(msg)
+        db.session.commit()
+
+
+def _notificar_necessita_despacho(demanda, titulo, atividade_id, usuario):
+    """Notifica os chefes da coordenação de que uma demanda requer despacho."""
+    chefes_emails = db.session.query(User.email, User.id)\
+                              .filter(or_(User.despacha == 1, User.despacha0 == 1),
+                                      User.coord == usuario.coord).all()
+
+    destino = [e[0] for e in chefes_emails]
+    destino.append(usuario.email)
+
+    if len(destino) > 1:
+        sistema = db.session.query(Sistema.nome_sistema).first()
+
+        html = render_template('email_pede_despacho.html', demanda=demanda.id, user=usuario.username,
+                                titulo=titulo, sistema=sistema.nome_sistema)
+
+        pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id == atividade_id).first()
+
+        send_email('Demanda ' + str(demanda.id) + ' requer despacho (' + pt.atividade_sigla + ')', destino, '', html)
+
+        for chefe in chefes_emails:
+            msg = Msgs_Recebidas(user_id=chefe.id, data_hora=datetime.now(),
+                                 demanda_id=demanda.id, msg='Chefia, a demanda está pedindo um despacho!')
+            db.session.add(msg)
+
+            msg = Msgs_Recebidas(user_id=usuario.id, data_hora=datetime.now(), demanda_id=demanda.id,
+                                 msg='Você marcou a opção -Necessita despacho?- na demanda!')
+            db.session.add(msg)
+
+        db.session.commit()
+
+
+def criar_demanda_via_sei(sei_url, tipo, atividade_id, titulo, desc, necessita_despacho,
+                           conclu, urgencia, convenio_data, usuario):
+    """
+    Cria uma demanda a partir do fluxo de registro livre por SEI.
+    Cria também o registro de DadosSEI se um convênio for informado e
+    ainda não existir uma associação SEI<->convênio.
+    """
+    sei = formata_sei_de_url(sei_url)
+
+    if convenio_data:
+        verif_sei = db.session.query(DadosSEI).filter(DadosSEI.nr_convenio == str(convenio_data)).first()
+        if verif_sei is None:
+            dadosSEI = DadosSEI(nr_convenio=str(convenio_data), sei=sei, epe='*', fiscal='')
+            db.session.add(dadosSEI)
+            db.session.commit()
+            registra_log_auto(usuario.id, None, 'sei')
+
+    data_conclu = None
+    data_env_despacho = None
+
+    if conclu != '0':
+        necessita_despacho = False
+        data_conclu = datetime.now()
+
+    if not convenio_data:
+        tem_conv = db.session.query(DadosSEI.nr_convenio).filter(DadosSEI.sei == sei).first()
+        conv = tem_conv.nr_convenio if tem_conv else ''
+    else:
+        conv = convenio_data
+
+    desp = 1 if necessita_despacho else 0
+    if desp == 1:
+        data_env_despacho = datetime.now()
+
+    demanda = Demanda(
+        programa=atividade_id, sei=sei, convênio=conv, ano_convênio=None, tipo=tipo,
+        data=datetime.now(), user_id=usuario.id, titulo=titulo, desc=desc,
+        necessita_despacho=desp, necessita_despacho_cg=0, conclu=conclu,
+        data_conclu=data_conclu, urgencia=urgencia, data_env_despacho=data_env_despacho,
+        nota=None, data_verific=None,
+    )
+
+    db.session.add(demanda)
+    db.session.commit()
+
+    registra_log_auto(usuario.id, demanda.id, 'inc')
+
+    if conclu != '0':
+        _notificar_demanda_concluida(demanda, titulo, atividade_id, usuario)
+
+    if desp == 1:
+        _notificar_necessita_despacho(demanda, titulo, atividade_id, usuario)
+
+    return demanda
+
+
+def criar_demanda_de_acordo_convenio(sei_url, tipo, atividade_id, conv_param, titulo, desc,
+                                       necessita_despacho, conclu, urgencia, convenio_data, usuario):
+    """
+    Cria uma demanda a partir do fluxo de registro vinculado a um
+    acordo ou convênio.
+    """
+    sei = formata_sei_de_url(sei_url)
+
+    data_conclu = None
+    data_env_despacho = None
+    conv = conv_param
+
+    if conclu != '0':
+        necessita_despacho = False
+        data_conclu = datetime.now()
+        conv = convenio_data if convenio_data else ''
+
+    desp = 1 if necessita_despacho else 0
+    if desp == 1:
+        data_env_despacho = datetime.now()
+
+    demanda = Demanda(
+        programa=atividade_id, sei=sei, convênio=conv, ano_convênio=None, tipo=tipo,
+        data=datetime.now(), user_id=usuario.id, titulo=titulo, desc=desc,
+        necessita_despacho=desp, necessita_despacho_cg=0, conclu=conclu,
+        data_conclu=data_conclu, urgencia=urgencia, data_env_despacho=data_env_despacho,
+        nota=None, data_verific=None,
+    )
+
+    db.session.add(demanda)
+    db.session.commit()
+
+    registra_log_auto(usuario.id, demanda.id, 'inc')
+
+    if conclu != '0':
+        _notificar_demanda_concluida(demanda, titulo, atividade_id, usuario)
+
+    if desp == 1:
+        _notificar_necessita_despacho(demanda, titulo, atividade_id, usuario)
+
+    return demanda

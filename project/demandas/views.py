@@ -401,46 +401,15 @@ def cria_demanda():
     if current_user.ativo == 0:
         abort(403)
 
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]    
-
-    # o choices do campo tipo são definidos aqui e não no form
-    tipos = db.session.query(Tipos_Demanda.tipo)\
-                      .filter(Tipos_Demanda.unidade.in_(l_unid))\
-                      .order_by(Tipos_Demanda.tipo)\
-                      .all()
-    lista_tipos = [(t.tipo,t.tipo) for t in tipos]
-    lista_tipos.insert(0,('',''))
-
     form = DemandaForm1()
 
-    form.tipo.choices = lista_tipos
+    form.tipo.choices = services.tipos_choices(current_user.coord)
 
     if form.validate_on_submit():
 
-        verif_demanda = db.session.query(Demanda)\
-                                  .filter(Demanda.sei == form.sei.data,
-                                          Demanda.tipo == form.tipo.data,
-                                          Demanda.conclu == '0')\
-                                  .first()
+        mensagem = services.verificar_demanda_duplicada(form.sei.data, form.tipo.data)
 
-        if verif_demanda == None:
-            mensagem = 'OK'
-        else:
-            mensagem = 'KO'+str(verif_demanda.id)
-
-        if '/' in str(form.sei.data):
-            sei=str(form.sei.data).split('/')[0]+'_'+str(form.sei.data).split('/')[1]
-        else:
-            sei = str(form.sei.data)
+        sei = services.formata_sei_para_url(form.sei.data)
 
         return redirect(url_for('demandas.confirma_cria_demanda',sei=sei,
                                                                  tipo=form.tipo.data,
@@ -458,166 +427,28 @@ def confirma_cria_demanda(sei,tipo,mensagem):
        |O título tem no máximo 140 caracteres.                                                |
        +--------------------------------------------------------------------------------------+
     """
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    sistema = db.session.query(Sistema.funcionalidade_conv,Sistema.funcionalidade_acordo).first()
-
-    # o choices do campo atividade são definidos aqui e não no form
-    atividades = db.session.query(Plano_Trabalho.id, Plano_Trabalho.atividade_sigla)\
-                           .filter(Plano_Trabalho.unidade.in_(l_unid))\
-                           .order_by(Plano_Trabalho.atividade_sigla).all()
-    lista_atividades = [(str(a.id),a.atividade_sigla) for a in atividades]
-    lista_atividades.insert(0,('',''))
+    sistema = services.dados_funcionalidade_sistema()
 
     form = DemandaForm()
 
-    form.atividade.choices = lista_atividades
+    form.atividade.choices = services.atividades_choices(current_user.coord)
 
     if form.validate_on_submit():
 
-        sei = str(sei).split('_')[0]+'/'+str(sei).split('_')[1]
-
-        if form.convênio.data != '' and form.convênio.data != None:
-
-            verif_sei = db.session.query(DadosSEI).filter(DadosSEI.nr_convenio == str(form.convênio.data)).first()
-
-            if verif_sei == None:
-                dadosSEI = DadosSEI(nr_convenio = str(form.convênio.data),
-                                    sei         = sei,
-                                    epe         = '*',
-                                    fiscal      = '')
-                db.session.add(dadosSEI)
-                db.session.commit()
-
-                registra_log_auto(current_user.id,None,'sei')
-
-                flash('Registro SEI criado a partir desta demanda!','sucesso')
-
-        data_conclu = None
-        data_env_despacho = None
-
-        if form.conclu.data != '0':
-            form.necessita_despacho.data = False
-            data_conclu = datetime.now()
-
-        # verifica se o SEI informado é de um convênio, acordo ou instrumentos
-        if form.convênio.data == ''  or form.convênio.data == None:
-            tem_conv = db.session.query(DadosSEI.nr_convenio).filter(DadosSEI.sei == sei).first()
-            if tem_conv == None:
-                conv = ''
-            else:
-                conv = tem_conv.nr_convenio
-        else:
-            conv = form.convênio.data
-
-        if form.necessita_despacho.data == True:
-            desp = 1
-            data_env_despacho = datetime.now()
-        else:
-            desp = 0
-
-        demanda = Demanda(programa              = form.atividade.data,
-                          sei                   = sei,
-                          convênio              = conv,
-                          ano_convênio          = '',
-                          tipo                  = tipo,
-                          data                  = datetime.now(),
-                          user_id               = current_user.id,
-                          titulo                = form.titulo.data,
-                          desc                  = form.desc.data,
-                          necessita_despacho    = desp,
-                          necessita_despacho_cg = 0,
-                          conclu                = form.conclu.data,
-                          data_conclu           = data_conclu,
-                          urgencia              = form.urgencia.data,
-                          data_env_despacho     = data_env_despacho,
-                          nota                  = None,
-                          data_verific          = None)
-
-        db.session.add(demanda)
-        db.session.commit()
-
-        registra_log_auto(current_user.id,demanda.id,'inc')
+        demanda = services.criar_demanda_via_sei(
+            sei_url=sei,
+            tipo=tipo,
+            atividade_id=form.atividade.data,
+            titulo=form.titulo.data,
+            desc=form.desc.data,
+            necessita_despacho=form.necessita_despacho.data,
+            conclu=form.conclu.data,
+            urgencia=form.urgencia.data,
+            convenio_data=form.convênio.data,
+            usuario=current_user,
+        )
 
         flash ('Demanda criada!','sucesso')
-
-        # enviar e-mail para chefes sobre demanda concluida
-        if form.conclu.data != '0':
-
-            chefes_emails = db.session.query(User.email)\
-                                      .filter(or_(User.despacha == 1,User.despacha0 == 1),
-                                              User.coord == current_user.coord)
-
-            destino = []
-            for email in chefes_emails:
-                destino.append(email[0])
-            destino.append(current_user.email)
-
-            if len(destino) > 1:
-
-                sistema = db.session.query(Sistema.nome_sistema).first()
-
-                html = render_template('email_demanda_conclu.html',demanda=demanda.id,user=current_user.username,
-                                        titulo=form.titulo.data, sistema=sistema.nome_sistema)
-
-                pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id == form.atividade.data).first()
-
-                send_email('Demanda ' + str(demanda.id) + ' foi concluída (' + pt.atividade_sigla + ')', destino,'', html)
-
-                msg = Msgs_Recebidas(user_id    = demanda.user_id,
-                                     data_hora  = datetime.now(),
-                                     demanda_id = demanda.id,
-                                     msg        = 'A demanda foi concluída!')
-
-                db.session.add(msg)
-                db.session.commit()
-
-        # enviar e-mail para chefes sobre necessidade de despacho
-        if form.necessita_despacho.data == True:
-
-            chefes_emails = db.session.query(User.email, User.id)\
-                                      .filter(or_(User.despacha == 1,User.despacha0 == 1),
-                                              User.coord == current_user.coord)
-
-            destino = []
-            for email in chefes_emails:
-                destino.append(email[0])
-            destino.append(current_user.email)
-
-            if len(destino) > 1:
-
-                sistema = db.session.query(Sistema.nome_sistema).first()
-
-                html = render_template('email_pede_despacho.html',demanda=demanda.id,user=current_user.username,
-                                        titulo=form.titulo.data,sistema=sistema.nome_sistema)
-
-                pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==form.atividade.data).first()
-
-                send_email('Demanda ' + str(demanda.id) + ' requer despacho (' + pt.atividade_sigla + ')', destino,'', html)
-
-                for user in chefes_emails:
-                    msg = Msgs_Recebidas(user_id    = user.id,
-                                         data_hora  = datetime.now(),
-                                         demanda_id = demanda.id,
-                                         msg        = 'Chefia, a demanda está pedindo um despacho!')
-                    db.session.add(msg)
-
-                    msg = Msgs_Recebidas(user_id    = current_user.id,
-                                         data_hora  = datetime.now(),
-                                         demanda_id = demanda.id,
-                                         msg        = 'Você marcou a opção -Necessita despacho?- na demanda!')
-                    db.session.add(msg)
-
-                db.session.commit()
 
         return redirect(url_for('demandas.demanda',demanda_id=demanda.id))
 
@@ -643,58 +474,25 @@ def acordo_convenio_demanda(prog,sei,conv,ano):
     if current_user.ativo == 0:
         abort(403)
 
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]    
-
-    # o choices do campo tipo são definidos aqui e não no form
-    tipos = db.session.query(Tipos_Demanda.tipo)\
-                      .filter(Tipos_Demanda.unidade.in_(l_unid))\
-                      .order_by(Tipos_Demanda.tipo)\
-                      .all()
-    lista_tipos = [(t.tipo,t.tipo) for t in tipos]
-    lista_tipos.insert(0,('',''))
-
     form = DemandaForm1()
 
-    form.tipo.choices = lista_tipos
+    form.tipo.choices = services.tipos_choices(current_user.coord)
 
     if form.validate_on_submit():
 
-        verif_demanda = db.session.query(Demanda)\
-                                  .filter(Demanda.sei == form.sei.data,
-                                          Demanda.tipo == form.tipo.data,
-                                          Demanda.conclu == '0')\
-                                  .first()
+        mensagem = services.verificar_demanda_duplicada(form.sei.data, form.tipo.data)
 
-        if verif_demanda == None:
-            mensagem = 'OK'
-        else:
-            mensagem = 'KO'+str(verif_demanda.id)
-
-        atividade = db.session.query(Plano_Trabalho.id)\
-                              .filter(Plano_Trabalho.atividade_sigla == prog).first()
-
-        if atividade == None:
-            atividade = db.session.query(Plano_Trabalho.id)\
-                                  .filter(Plano_Trabalho.atividade_sigla == "Diversos").first()
+        atividade = services.atividade_id_por_programa(prog)
 
         return redirect(url_for('demandas.confirma_acordo_convenio_demanda',
                                                         prog=atividade.id,
-                                                        sei=str(form.sei.data).split('/')[0]+'_'+str(form.sei.data).split('/')[1],
+                                                        sei=services.formata_sei_para_url(form.sei.data),
                                                         conv=conv,
                                                         ano=ano,
                                                         tipo=form.tipo.data,
                                                         mensagem=mensagem))
 
-    form.sei.data = str(sei).split('_')[0]+'/'+str(sei).split('_')[1]
+    form.sei.data = services.formata_sei_de_url(sei)
 
     return render_template('add_demanda1.html', form = form)
 
@@ -710,144 +508,29 @@ def confirma_acordo_convenio_demanda(prog,sei,conv,ano,tipo,mensagem):
        |Atenção para o Título da Demanda que não pode passar de 140 caracteres.               |
        +--------------------------------------------------------------------------------------+
     """
-
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
-    sistema = db.session.query(Sistema.funcionalidade_conv,Sistema.funcionalidade_acordo).first()
-
-    # o choices do campo atividade são definidos aqui e não no form
-    atividades = db.session.query(Plano_Trabalho.id, Plano_Trabalho.atividade_sigla)\
-                           .filter(Plano_Trabalho.unidade.in_(l_unid))\
-                           .order_by(Plano_Trabalho.atividade_sigla).all()
-    lista_atividades = [(str(a.id),a.atividade_sigla) for a in atividades]
-    lista_atividades.insert(0,('',''))
+    sistema = services.dados_funcionalidade_sistema()
 
     form = DemandaForm()
 
-    form.atividade.choices= lista_atividades
+    form.atividade.choices= services.atividades_choices(current_user.coord)
 
     if form.validate_on_submit():
 
-        data_conclu = None
-        data_env_despacho = None
-
-        if form.conclu.data != '0':
-            form.necessita_despacho.data = False
-            data_conclu = datetime.now()
-
-            if form.convênio.data == ''  or form.convênio.data == None:
-                conv = ''
-            else:
-                conv = form.convênio.data
-
-        if form.necessita_despacho.data == True:
-            data_env_despacho = datetime.now()
-            desp = 1
-        else:
-            desp = 0
-
-        demanda = Demanda(programa              = form.atividade.data,
-                          sei                   = str(sei).split('_')[0]+'/'+str(sei).split('_')[1],
-                          convênio              = conv,
-                          ano_convênio          = '',
-                          tipo                  = tipo,
-                          data                  = datetime.now(),
-                          user_id               = current_user.id,
-                          titulo                = form.titulo.data,
-                          desc                  = form.desc.data,
-                          necessita_despacho    = desp,
-                          necessita_despacho_cg = 0,
-                          conclu                = form.conclu.data,
-                          data_conclu           = data_conclu,
-                          urgencia              = form.urgencia.data,
-                          data_env_despacho     = data_env_despacho,
-                          nota                  = None,
-                          data_verific          = None)
-
-        db.session.add(demanda)
-        db.session.commit()
-
-        registra_log_auto(current_user.id,demanda.id,'inc')
+        demanda = services.criar_demanda_de_acordo_convenio(
+            sei_url=sei,
+            tipo=tipo,
+            atividade_id=form.atividade.data,
+            conv_param=conv,
+            titulo=form.titulo.data,
+            desc=form.desc.data,
+            necessita_despacho=form.necessita_despacho.data,
+            conclu=form.conclu.data,
+            urgencia=form.urgencia.data,
+            convenio_data=form.convênio.data,
+            usuario=current_user,
+        )
 
         flash ('Demanda criada!','sucesso')
-
-        # enviar e-mail para chefes sobre demanda concluida
-        if form.conclu.data != '0':
-
-            chefes_emails = db.session.query(User.email)\
-                                      .filter(or_(User.despacha == 1,User.despacha0 == 1),
-                                              User.coord == current_user.coord)
-
-            destino = []
-            for email in chefes_emails:
-                destino.append(email[0])
-            destino.append(current_user.email)
-
-            if len(destino) > 1:
-
-                sistema = db.session.query(Sistema.nome_sistema).first()
-
-                html = render_template('email_demanda_conclu.html',demanda=demanda.id,user=current_user.username,
-                                        titulo=form.titulo.data,sistema=sistema.nome_sistema)
-
-                pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==form.atividade.data).first()
-
-                send_email('Demanda ' + str(demanda.id) + ' foi concluída (' + pt.atividade_sigla + ')', destino,'', html)
-
-                msg = Msgs_Recebidas(user_id    = demanda.user_id,
-                                     data_hora  = datetime.now(),
-                                     demanda_id = demanda.id,
-                                     msg        = 'A demanda foi concluída!')
-
-                db.session.add(msg)
-                db.session.commit()
-
-        # enviar e-mail para chefes sobre necessidade de despacho
-        if form.necessita_despacho.data == True:
-
-            chefes_emails = db.session.query(User.email,User.id)\
-                                      .filter(or_(User.despacha == 1,User.despacha0 == 1),
-                                              User.coord == current_user.coord)
-
-            destino = []
-            for email in chefes_emails:
-                destino.append(email[0])
-            destino.append(current_user.email)
-
-            if len(destino) > 1:
-
-                sistema = db.session.query(Sistema.nome_sistema).first()
-
-                html = render_template('email_pede_despacho.html',demanda=demanda.id,user=current_user.username,
-                                        titulo=form.titulo.data,sistema=sistema.nome_sistema)
-
-                pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==form.atividade.data).first()
-
-                send_email('Demanda ' + str(demanda.id) + ' requer despacho (' + pt.atividade_sigla + ')', destino,'', html)
-
-                for user in chefes_emails:
-                    msg = Msgs_Recebidas(user_id    = user.id,
-                                         data_hora  = datetime.now(),
-                                         demanda_id = demanda.id,
-                                         msg        = 'Chefia, a demanda está pedindo um despacho!')
-                    db.session.add(msg)
-
-                    msg = Msgs_Recebidas(user_id    = current_user.id,
-                                         data_hora  = datetime.now(),
-                                         demanda_id = demanda.id,
-                                         msg        = 'Você marcou a opção -Necessita despacho?- na demanda!')
-                    db.session.add(msg)
-
-                db.session.commit()
 
         return redirect(url_for('demandas.demanda',demanda_id=demanda.id))
 
@@ -866,6 +549,7 @@ def confirma_acordo_convenio_demanda(prog,sei,conv,ano,tipo,mensagem):
     return render_template('add_demanda.html', form = form, sei = sei, tipo = tipo, sistema=sistema)
 
 
+#lendo uma demanda
 #lendo uma demanda
 
 @demandas.route('/demanda/<int:demanda_id>',methods=['GET','POST'])
