@@ -18,8 +18,17 @@ from datetime import datetime
 
 from flask_mail import Message
 
+import os
+from datetime import date
+
+from fpdf import FPDF
+from sqlalchemy import func
+
 from project import db, mail, app
-from project.models import Log_Auto, Plano_Trabalho, Ativ_Usu, User, Coords
+from project.models import (
+    Log_Auto, Plano_Trabalho, Ativ_Usu, User, Coords, Tipos_Demanda,
+    Passos_Tipos, Demanda, Providencia, Despacho,
+)
 
 
 # =============================================================================
@@ -164,3 +173,259 @@ def excluir_atividade(atividade_id, usuario_id):
     db.session.commit()
 
     registra_log_auto(usuario_id, None, 'xpt')
+
+
+# =============================================================================
+# Tipos de demanda / passos
+# =============================================================================
+
+def listar_tipos_demanda(unidade, relevancia_choices):
+    """
+    Retorna os tipos de demanda da unidade do usuário (e suas filhas,
+    se houver), já formatados com a descrição textual da relevância,
+    quantidade de passos e quantidade de demandas associadas.
+    """
+    l_unid = _unidades_hierarquia(unidade)
+
+    tipos = db.session.query(Tipos_Demanda.id, Tipos_Demanda.tipo,
+                             Tipos_Demanda.relevancia, Tipos_Demanda.unidade)\
+                      .filter(Tipos_Demanda.unidade.in_(l_unid))\
+                      .order_by(Tipos_Demanda.tipo).all()
+
+    tipos_s = []
+    for tipo in tipos:
+        qtd_passos = db.session.query(func.count(Passos_Tipos.tipo_id))\
+                               .filter(Passos_Tipos.tipo_id == tipo.id).all()
+        demandas_qtd = db.session.query(Demanda.id).filter(Demanda.tipo == tipo.tipo).count()
+
+        tipo_s = list(tipo)
+        tipo_s.append(dict(relevancia_choices)[str(tipo.relevancia)])
+        tipo_s.append(qtd_passos[0][0])
+        tipo_s.append(demandas_qtd)
+
+        tipos_s.append(tipo_s)
+
+    return tipos_s
+
+
+def gerar_pdf_procedimentos(tipos_s):
+    """
+    Gera o PDF com a lista de todos os procedimentos (tipos de demanda
+    e respectivos passos) em project/static/procedimentos.pdf (caminho
+    portável, funciona fora do container Docker).
+    """
+    class PDF_procedimentos(FPDF):
+        def header(self):
+            self.set_font('Arial', 'B', 10)
+            self.set_text_color(127, 127, 127)
+            self.cell(0, 10, 'Lista de procedimentos (Tipos de Demanda e respectivos Passos) - gerado em ' + date.today().strftime('%d/%m/%Y'), 1, 1, 'C')
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Arial', 'I', 8)
+            self.set_text_color(127, 127, 127)
+            self.cell(0, 10, 'Página ' + str(self.page_no()) + '/{nb}', 0, 0, 'C')
+
+    pdf = PDF_procedimentos()
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    pdf.set_font('Times', '', 12)
+
+    for tipo in tipos_s:
+
+        passos = db.session.query(Passos_Tipos.ordem, Passos_Tipos.passo, Passos_Tipos.desc)\
+                            .filter(Passos_Tipos.tipo_id == tipo[0])\
+                            .order_by(Passos_Tipos.ordem)\
+                            .all()
+        qtd = len(passos)
+
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(0, 10, tipo[1] + ' (' + str(qtd) + ' passos)' + '    Relevância: ' + tipo[4], 0, 0)
+        pdf.ln(10)
+
+        if qtd == 0:
+            pdf.set_font('Times', '', 10)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(20, 10, 'Não há passos definidos.', 0, 0)
+            pdf.ln(15)
+        else:
+            for passo in passos:
+                pdf.set_font('Times', '', 10)
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(20, 10, str(passo.ordem) + 'º passo:', 0, 0)
+
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(0, 10, passo.passo, 0, 1)
+
+                texto = passo.desc.encode('latin-1', 'replace').decode('latin-1')
+                tamanho_texto = pdf.get_string_width(texto)
+                pdf.multi_cell(0, 5, texto)
+                if tamanho_texto <= 100:
+                    pdf.ln(15)
+                else:
+                    pdf.ln(tamanho_texto / 20)
+
+        pdf.ln(5)
+        pdf.dashed_line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y(), 2, 3)
+
+    # Caminho portável (funciona em qualquer ambiente, não só no container Docker)
+    pasta_pdf = os.path.join(app.root_path, 'static', 'procedimentos.pdf')
+    pdf.output(pasta_pdf)
+
+
+def buscar_tipo(id):
+    """Busca um tipo de demanda pelo ID, ou levanta 404 se não existir."""
+    return Tipos_Demanda.query.get_or_404(id)
+
+
+def excluir_tipo_demanda(id, usuario_id):
+    """
+    Remove um tipo de demanda, se não houver nenhuma demanda associada
+    a ele. Retorna uma tupla (status, tipo), onde status é 'excluido'
+    ou 'em_uso'.
+    """
+    tipo = buscar_tipo(id)
+
+    demandas_qtd = db.session.query(Demanda.id).filter(Demanda.tipo == tipo.tipo).count()
+
+    if demandas_qtd == 0:
+        db.session.delete(tipo)
+        db.session.commit()
+
+        registra_log_auto(usuario_id, None, 'det')
+
+        return 'excluido', tipo, 0
+
+    return 'em_uso', tipo, demandas_qtd
+
+
+def atualizar_tipo_demanda(id, tipo_novo, relevancia, unidade, usuario_id):
+    """
+    Atualiza um tipo de demanda e propaga o novo nome para todas as
+    demandas que usavam o nome anterior.
+    """
+    tipo = buscar_tipo(id)
+    tipo_ant = tipo.tipo
+
+    tipo.tipo = tipo_novo
+    tipo.relevancia = relevancia
+    tipo.unidade = unidade
+
+    db.session.commit()
+
+    if tipo_novo != tipo_ant:
+        demandas_alterar_tipo = db.session.query(Demanda).filter(Demanda.tipo == tipo_ant).all()
+        for demanda in demandas_alterar_tipo:
+            demanda.tipo = tipo_novo
+        db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'iat')
+
+    return tipo
+
+
+def criar_tipo_demanda(tipo, relevancia, unidade, usuario_id):
+    """Registra um novo tipo de demanda."""
+    novo_tipo = Tipos_Demanda(tipo=tipo, relevancia=relevancia, unidade=unidade)
+
+    db.session.add(novo_tipo)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'iat')
+
+    return novo_tipo
+
+
+def nome_do_tipo(tipo_id):
+    """Retorna o nome (texto) de um tipo de demanda a partir do seu ID."""
+    return db.session.query(Tipos_Demanda.tipo).filter(Tipos_Demanda.id == tipo_id).first()
+
+
+def criar_passo_tipo(tipo_id, ordem, passo, desc, usuario_id):
+    """
+    Registra um novo passo para um tipo de demanda, reordenando os
+    passos existentes se o novo passo for inserido no meio da lista.
+    """
+    passos_qtd = db.session.query(Passos_Tipos.id).filter(Passos_Tipos.tipo_id == tipo_id).count()
+
+    if ordem <= passos_qtd:
+        re_order = list(range(ordem, passos_qtd + 1))
+        re_order.reverse()
+
+        for o in re_order:
+            passo_existente = db.session.query(Passos_Tipos)\
+                                        .filter(Passos_Tipos.tipo_id == tipo_id, Passos_Tipos.ordem == o).first()
+            passo_existente.ordem = o + 1
+            db.session.commit()
+
+    passo_reg = Passos_Tipos(tipo_id=tipo_id, ordem=ordem, passo=passo, desc=desc)
+    db.session.add(passo_reg)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'ips')
+
+    return passo_reg
+
+
+def buscar_passo(id):
+    """Busca um passo de tipo de demanda pelo ID, ou levanta 404 se não existir."""
+    return Passos_Tipos.query.get_or_404(id)
+
+
+def atualizar_passo_tipo(id, ordem, passo_novo, desc, usuario_id):
+    """
+    Atualiza um passo de tipo de demanda, propagando o novo texto do
+    passo para providências e despachos que referenciavam o texto
+    anterior.
+    """
+    passo = buscar_passo(id)
+    passo_ant = passo.passo
+
+    passo.ordem = ordem
+    passo.passo = passo_novo
+    passo.desc = desc
+
+    db.session.commit()
+
+    if passo_novo != passo_ant:
+        providencias_alterar_passo = db.session.query(Providencia).filter(Providencia.passo == passo_ant).all()
+        despachos_alterar_passo = db.session.query(Despacho).filter(Despacho.passo == passo_ant).all()
+        for prov in providencias_alterar_passo:
+            prov.passo = passo_novo
+        for desp in despachos_alterar_passo:
+            desp.passo = passo_novo
+        db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'aps')
+
+    return passo
+
+
+def listar_passos_tipo(tipo_id):
+    """
+    Retorna o nome do tipo e seus passos, ordenados. Renumera os
+    passos automaticamente se alguma desordem for encontrada (a
+    numeração deveria ser sempre sequencial 1..N).
+    """
+    tipo = nome_do_tipo(tipo_id)
+
+    passos = db.session.query(Passos_Tipos.id, Passos_Tipos.ordem,
+                              Passos_Tipos.passo, Passos_Tipos.desc)\
+                       .filter(Passos_Tipos.tipo_id == tipo_id)\
+                       .order_by(Passos_Tipos.ordem).all()
+
+    quantidade = len(passos)
+
+    if quantidade > 1 and quantidade != passos[-1].ordem:
+        for index, passo in enumerate(passos):
+            step = Passos_Tipos.query.get_or_404(passo.id)
+            step.ordem = index + 1
+            db.session.commit()
+
+        passos = db.session.query(Passos_Tipos.id, Passos_Tipos.ordem,
+                                  Passos_Tipos.passo, Passos_Tipos.desc)\
+                           .filter(Passos_Tipos.tipo_id == tipo_id)\
+                           .order_by(Passos_Tipos.ordem).all()
+
+    return tipo, passos, quantidade

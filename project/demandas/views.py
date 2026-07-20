@@ -207,6 +207,7 @@ def delete_atividade(atividade_id):
 ## lista tipos de demanda
 
 @demandas.route('/lista_tipos', methods=['GET','POST'])
+@login_required
 def lista_tipos():
     """
     +---------------------------------------------------------------------------------------+
@@ -215,45 +216,9 @@ def lista_tipos():
     +---------------------------------------------------------------------------------------+
     """
 
-    unidade = current_user.coord
-
-    # se unidade for pai, junta ela com seus filhos
-    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
-
-    if hierarquia:
-        l_unid = [f.sigla for f in hierarquia]
-        l_unid.append(unidade)
-    else:
-        l_unid = [unidade]
-
     form = Tipos_DemandaForm()
 
-    ## lê tabela tipos_demanda
-    tipos = db.session.query(Tipos_Demanda.id,
-                             Tipos_Demanda.tipo,
-                             Tipos_Demanda.relevancia,
-                             Tipos_Demanda.unidade)\
-                      .filter(Tipos_Demanda.unidade.in_(l_unid))\
-                      .order_by(Tipos_Demanda.tipo).all()
-
-    quantidade = len(tipos)
-
-    tipos_s = []
-
-    for tipo in tipos:
-
-        qtd_passos = db.session.query(func.count(Passos_Tipos.tipo_id)).filter(Passos_Tipos.tipo_id == tipo.id).all()
-        demandas_qtd = db.session.query(Demanda.id).filter(Demanda.tipo == tipo.tipo).count()
-
-        tipo_s = list(tipo)
-
-        tipo_s.append(dict(form.relevancia.choices)[str(tipo.relevancia)])
-        tipo_s.append(qtd_passos[0][0])
-        tipo_s.append(demandas_qtd)
-
-        tipos_s.append(tipo_s)
-
-
+    tipos_s = services.listar_tipos_demanda(current_user.coord, form.relevancia.choices)
 
     #
     # gera um pdf com lista de todos os procedimentos (tipos e passos)
@@ -262,87 +227,11 @@ def lista_tipos():
 
     if form2.validate_on_submit():
 
-        class PDF_procedimentos(FPDF):
-            # cabeçalho
-            def header(self):
-
-                self.set_font('Arial', 'B', 10)
-                self.set_text_color(127,127,127)
-                self.cell(0, 10, 'Lista de procedimentos (Tipos de Demanda e respectivos Passos) - gerado em '+date.today().strftime('%d/%m/%Y'), 1, 1,'C')
-
-            # Rodape da página
-            def footer(self):
-                # Posicionado a 1,5 cm do final da página
-                self.set_y(-15)
-                # Arial italic 8 cinza
-                self.set_font('Arial', 'I', 8)
-                self.set_text_color(127,127,127)
-                # Numeração de página
-                self.cell(0, 10, 'Página ' + str(self.page_no()) + '/{nb}', 0, 0, 'C')
-
-        # Instanciando a classe herdada
-        pdf = PDF_procedimentos()
-        pdf.alias_nb_pages()
-        pdf.add_page()
-        pdf.set_font('Times', '', 12)
-
-        # Tipos e Passos:
-
-        for tipo in tipos_s:
-
-            print('*** tipo: ',tipo)
-
-            passos = db.session.query(Passos_Tipos.ordem, Passos_Tipos.passo, Passos_Tipos.desc)\
-                                .filter(Passos_Tipos.tipo_id == tipo[0])\
-                                .order_by(Passos_Tipos.ordem)\
-                                .all()
-            qtd = len(passos)
-
-            pdf.set_text_color(0,0,0)
-            pdf.set_font('Arial', 'B', 10)
-            pdf.cell(0, 10, tipo[1] +' ('+str(qtd)+' passos)'+'    Relevância: '+ tipo[4], 0, 0)
-            pdf.ln(10)
-
-            if qtd == 0:
-                pdf.set_font('Times', '', 10)
-
-                pdf.set_text_color(0,0,0)
-                pdf.cell(20, 10, 'Não há passos definidos.', 0, 0)
-                pdf.ln(15)
-                
-            else:
-                for passo in passos:
-
-                    pdf.set_font('Times', '', 10)
-
-                    pdf.set_text_color(0,0,0)
-                    pdf.cell(20, 10, str(passo.ordem)+'º passo:', 0, 0)
-
-                    pdf.set_text_color(0,0,0)
-                    pdf.cell(0, 10, passo.passo, 0, 1)
-
-                    texto = passo.desc.encode('latin-1', 'replace').decode('latin-1')
-                    tamanho_texto = pdf.get_string_width(texto)
-                    pdf.multi_cell(0, 5, texto)
-                    if tamanho_texto <= 100:
-                        pdf.ln(15)
-                    else:
-                        pdf.ln(tamanho_texto/20)
-
-            pdf.ln(5)
-            pdf.dashed_line(pdf.get_x(), pdf.get_y(), pdf.get_x()+190, pdf.get_y(), 2, 3)
-
-
-        pasta_pdf = os.path.normpath('/app/project/static/procedimentos.pdf')
-
-        pdf.output(pasta_pdf, 'F')
-
-        # o comandinho mágico que permite fazer o download de um arquivo
-        send_from_directory('/app/project/static', 'procedimentos.pdf') 
+        services.gerar_pdf_procedimentos(tipos_s)
 
         return redirect(url_for('static', filename='procedimentos.pdf'))
 
-    return render_template('lista_tipos.html', tipos = tipos_s, quantidade=quantidade, form = form2)
+    return render_template('lista_tipos.html', tipos = tipos_s, quantidade=len(tipos_s), form = form2)
 
 #
 #removendo um tipo de demanda
@@ -360,23 +249,12 @@ def delete_tipo_demanda(id):
     if current_user.ativo == 0:
         abort(403)
 
-    tipo = Tipos_Demanda.query.get_or_404(id)
+    status, tipo, demandas_qtd = services.excluir_tipo_demanda(id, current_user.id)
 
-    demandas_qtd = db.session.query(Demanda.id).filter(Demanda.tipo == tipo.tipo).count()
-
-    if demandas_qtd == 0:
-
-        db.session.delete(tipo)
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'det')
-
+    if status == 'excluido':
         flash ('Tipo de demanda '+ tipo.tipo + ' excluído!','sucesso')
-
     else:
-
         flash ('O tipo: '+ tipo.tipo + ' não pode ser excluído, pois há '+ str(demandas_qtd) +' demanda(s) associada(s) a ele!','erro')
-
 
     return redirect(url_for('demandas.lista_tipos'))
 
@@ -393,29 +271,13 @@ def tipos_update(id):
     +----------------------------------------------------------------------------------------------+
     """
 
-    unidade = current_user.coord
-
-    tipo = Tipos_Demanda.query.get_or_404(id)
-
-    tipo_ant = tipo.tipo
+    tipo = services.buscar_tipo(id)
 
     form = Tipos_DemandaForm()
 
     if form.validate_on_submit():
 
-        tipo.tipo       = form.tipo.data
-        tipo.relevancia = form.relevancia.data
-        tipo.unidade    = unidade
-
-        db.session.commit()
-
-        if form.tipo.data != tipo_ant:
-            demandas_alterar_tipo = db.session.query(Demanda).filter(Demanda.tipo == tipo_ant).all()
-            for demanda in demandas_alterar_tipo:
-                demanda.tipo = form.tipo.data
-            db.session.commit()
-
-        registra_log_auto(current_user.id,None,'iat')
+        services.atualizar_tipo_demanda(id, form.tipo.data, form.relevancia.data, current_user.coord, current_user.id)
 
         flash('Tipo de demanda atualizado!')
         return redirect(url_for('demandas.lista_tipos'))
@@ -439,18 +301,11 @@ def cria_tipo_demanda():
     +---------------------------------------------------------------------------------------+
     """
 
-    unidade = current_user.coord
-
     form = Tipos_DemandaForm()
 
     if form.validate_on_submit():
-        tipo = Tipos_Demanda(tipo       = form.tipo.data,
-                             relevancia = form.relevancia.data,
-                             unidade    = unidade)
-        db.session.add(tipo)
-        db.session.commit()
 
-        registra_log_auto(current_user.id,None,'iat')
+        services.criar_tipo_demanda(form.tipo.data, form.relevancia.data, current_user.coord, current_user.id)
 
         flash('Tipo de demanda inserido!')
         return redirect(url_for('demandas.lista_tipos'))
@@ -469,33 +324,13 @@ def cria_passo_tipo(tipo_id):
     +---------------------------------------------------------------------------------------+
     """
 
-    tipo = db.session.query(Tipos_Demanda.tipo).filter(Tipos_Demanda.id == tipo_id).first()
-
-    passos_qtd = db.session.query(Passos_Tipos.id).filter(Passos_Tipos.tipo_id==tipo_id).count()
+    tipo = services.nome_do_tipo(tipo_id)
 
     form = Passos_Tipos_Form()
 
     if form.validate_on_submit():
 
-        if form.ordem.data <= passos_qtd:
-
-            re_order = range(form.ordem.data,passos_qtd + 1)
-            re_order = list(re_order)
-            re_order.reverse()
-
-            for o in re_order:
-                passo = db.session.query(Passos_Tipos).filter(Passos_Tipos.tipo_id==tipo_id, Passos_Tipos.ordem==o).first()
-                passo.ordem = o + 1
-                db.session.commit()
-
-        passo_reg = Passos_Tipos(tipo_id = tipo_id,
-                                 ordem   = form.ordem.data,
-                                 passo   = form.passo.data,
-                                 desc    = form.desc.data)
-        db.session.add(passo_reg)
-        db.session.commit()
-
-        registra_log_auto(current_user.id,None,'ips')
+        services.criar_passo_tipo(tipo_id, form.ordem.data, form.passo.data, form.desc.data, current_user.id)
 
         flash('Passo de tipo de demanda inserido!')
         return redirect(url_for('demandas.lista_passos_tipos', tipo_id=tipo_id))
@@ -516,33 +351,15 @@ def update_passo_tipo(id,tipo_id):
     +----------------------------------------------------------------------------------------------+
     """
 
-    tipo = db.session.query(Tipos_Demanda.tipo).filter(Tipos_Demanda.id == tipo_id).first()
+    tipo = services.nome_do_tipo(tipo_id)
 
-    passo = Passos_Tipos.query.get_or_404(id)
-
-    passo_ant = passo.passo
+    passo = services.buscar_passo(id)
 
     form = Passos_Tipos_Form()
 
     if form.validate_on_submit():
 
-        passo.ordem = form.ordem.data
-        passo.passo = form.passo.data
-        passo.desc  = form.desc.data
-
-        db.session.commit()
-
-        ### para ajustar quando os passos forem associados a providências e despachos
-        if form.passo.data != passo_ant:
-            providencias_alterar_passo = db.session.query(Providencia).filter(Providencia.passo == passo_ant).all()
-            despachos_alterar_passo = db.session.query(Despacho).filter(Despacho.passo == passo_ant).all()
-            for prov in providencias_alterar_passo:
-                prov.passo = form.passo.data
-            for desp in despachos_alterar_passo:
-                desp.passo = form.passo.data
-            db.session.commit()
-
-        registra_log_auto(current_user.id,None,'aps')
+        services.atualizar_passo_tipo(id, form.ordem.data, form.passo.data, form.desc.data, current_user.id)
 
         flash('Passo de Tipo de demanda atualizado!')
         return redirect(url_for('demandas.lista_passos_tipos', tipo_id=tipo_id))
@@ -563,38 +380,7 @@ def lista_passos_tipos(tipo_id):
     |Lista os passos de um tipo de demanda.                                                 |
     +---------------------------------------------------------------------------------------+
     """
-    tipo = db.session.query(Tipos_Demanda.tipo).filter(Tipos_Demanda.id == tipo_id).first()
-
-    ## lê tabela passos_tipos
-    passos = db.session.query(Passos_Tipos.id,
-                              Passos_Tipos.ordem,
-                              Passos_Tipos.passo,
-                              Passos_Tipos.desc)\
-                        .filter(Passos_Tipos.tipo_id == tipo_id)\
-                        .order_by(Passos_Tipos.ordem).all()
-
-    quantidade = len(passos)
-
-    qtd_passos = enumerate
-
-    # renumera os passos no caso de desordem enconcontrada
-    if quantidade > 1:
-        if quantidade != passos[-1].ordem:
-
-            for index, passo in enumerate(passos):
-
-                step = Passos_Tipos.query.get_or_404(passo.id)
-                step.ordem = index + 1
-
-                db.session.commit()
-
-            passos = db.session.query(Passos_Tipos.id,
-                                      Passos_Tipos.ordem,
-                                      Passos_Tipos.passo,
-                                      Passos_Tipos.desc)\
-                                .filter(Passos_Tipos.tipo_id == tipo_id)\
-                                .order_by(Passos_Tipos.ordem).all()
-
+    tipo, passos, quantidade = services.listar_passos_tipo(tipo_id)
 
     return render_template('lista_passos_tipos.html', tipo_id = tipo_id, tipo = tipo, passos = passos, quantidade=quantidade)
 
