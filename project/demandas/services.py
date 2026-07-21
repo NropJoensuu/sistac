@@ -24,6 +24,7 @@ import os
 import sys
 import pickle
 from datetime import date, timedelta
+from calendar import monthrange
 
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -1602,3 +1603,398 @@ def criar_providencia(demanda_id, data_hora, texto, duracao, passo_data, necessi
         agendada = True
 
     return demanda, agendada
+
+
+# =============================================================================
+# Resumo / números
+# =============================================================================
+
+def resumo_demandas(coord):
+    """
+    Agrega informações básicas de todas as demandas de uma
+    coordenação: contagem por tipo, vida média, prazo médio de
+    despacho, percentual de conclusão, e médias mensais dos últimos
+    12 meses (demandas, providências, despachos).
+    """
+    hoje = date.today()
+
+    ## conta demandas por tipo, destacando a quantidade concluída e a vida média
+    demandas_count = db.session.query(Demanda, User.coord)\
+                               .join(User, Demanda.user_id == User.id)\
+                               .filter(User.coord.like(coord))\
+                               .count()
+
+    demandas_por_tipo = db.session.query(Demanda.tipo, label('qtd_por_tipo', func.count(Demanda.id)))\
+                                  .join(User, Demanda.user_id == User.id)\
+                                  .order_by(func.count(Demanda.id).desc())\
+                                  .filter(User.coord.like(coord))\
+                                  .group_by(Demanda.tipo)
+
+    demandas_por_tipo_ano_anterior = db.session.query(Demanda.tipo, label('qtd_por_tipo', func.count(Demanda.id)))\
+                                               .join(User, Demanda.user_id == User.id)\
+                                               .filter(Demanda.data >= str(hoje.year - 1) + '-1-1',
+                                                       Demanda.data <= str(hoje.year - 1) + '-12-31',
+                                                       User.coord.like(coord))\
+                                               .group_by(Demanda.tipo)
+
+    demandas_por_tipo_ano_corrente = db.session.query(Demanda.tipo, label('qtd_por_tipo', func.count(Demanda.id)))\
+                                               .join(User, Demanda.user_id == User.id)\
+                                               .filter(Demanda.data >= str(hoje.year) + '-1-1',
+                                                       User.coord.like(coord))\
+                                               .group_by(Demanda.tipo)
+
+    m_top = hoje.month
+    y_top = hoje.year
+    m_ini = m_top - 11
+    y_ini = y_top
+    if m_ini < 1:
+        m_ini += 12
+        y_ini -= 1
+    s_m_ini = str(m_ini)
+    s_y_ini = str(y_ini)
+    s_m_top = str(m_top)
+    s_y_top = str(y_top)
+
+    demandas_por_tipo_12meses = db.session.query(Demanda.tipo, label('qtd_por_tipo', func.count(Demanda.id)))\
+                                          .join(User, Demanda.user_id == User.id)\
+                                          .filter(Demanda.data >= s_y_ini + '-' + s_m_ini + '-1',
+                                                  Demanda.data <= s_y_top + '-' + s_m_top + '-' + str(monthrange(y_top, m_top)[1]),
+                                                  User.coord.like(coord))\
+                                          .group_by(Demanda.tipo)
+
+    demandas_tipos = db.session.query(Tipos_Demanda.tipo)\
+                               .filter(Tipos_Demanda.unidade.like(coord))\
+                               .order_by(Tipos_Demanda.tipo).all()
+
+    ## calcula a vida média das demandas por tipo
+    vida_m_por_tipo = []
+
+    for demanda in demandas_por_tipo:
+        demandas_datas = db.session.query(Demanda.data, Demanda.data_conclu)\
+                                    .join(User, Demanda.user_id == User.id)\
+                                    .filter(Demanda.tipo == demanda.tipo,
+                                            Demanda.conclu == '1',
+                                            Demanda.data_conclu != None,
+                                            User.coord.like(coord))
+
+        demandas_conclu_por_tipo = db.session.query(Demanda.tipo, label('qtd_conclu', func.count(Demanda.id)))\
+                                             .join(User, Demanda.user_id == User.id)\
+                                             .filter(Demanda.tipo == demanda.tipo,
+                                                     Demanda.conclu == '1',
+                                                     User.coord.like(coord))\
+                                             .group_by(Demanda.tipo)
+
+        vida = 0
+        for dia in demandas_datas:
+            vida += (dia.data_conclu - dia.data).days
+
+        qtd_datas = len(list(demandas_datas))
+        vida_m = round(vida / qtd_datas) if qtd_datas > 0 else 0
+
+        if len(demandas_conclu_por_tipo.all()) != 0:
+            vida_m_por_tipo.append([demanda.tipo, demandas_conclu_por_tipo[0][1], vida_m])
+
+    ## calcula a vida média das demandas (geral)
+    demandas_datas = db.session.query(Demanda.data, Demanda.data_conclu)\
+                               .join(User, Demanda.user_id == User.id)\
+                               .filter(Demanda.conclu == '1',
+                                       Demanda.data_conclu != None,
+                                       User.coord.like(coord))
+
+    vida = 0
+    for dia in demandas_datas:
+        vida += (dia.data_conclu - dia.data).days
+
+    qtd_datas = len(list(demandas_datas))
+    vida_m = round(vida / qtd_datas) if qtd_datas > 0 else 0
+
+    ## calcula a vida média das demandas (ano corrente)
+    inic_ano = str(hoje.year) + '-01-01'
+
+    demandas_ano = db.session.query(Demanda.data, Demanda.data_conclu)\
+                             .join(User, Demanda.user_id == User.id)\
+                             .filter(Demanda.conclu == '1',
+                                     Demanda.data > inic_ano,
+                                     User.coord.like(coord))
+    vida = 0
+    for dia in demandas_ano:
+        vida += (dia.data_conclu - dia.data).days
+
+    qtd_ano = len(list(demandas_ano))
+    vida_m_ano = round(vida / qtd_ano) if qtd_ano > 0 else 0
+
+    ## calcula o prazo médio dos despachos
+    despachos = db.session.query(label('c_data', Despacho.data), Despacho.demanda_id,
+                                 Demanda.id, label('i_data', Demanda.data))\
+                          .join(User, Despacho.user_id == User.id)\
+                          .outerjoin(Demanda, Despacho.demanda_id == Demanda.id)\
+                          .filter(User.coord.like(coord))\
+                          .all()
+
+    desp = 0
+    for despacho in despachos:
+        desp += (despacho.c_data - despacho.i_data).days
+
+    qtd_despachos = len(list(despachos))
+    desp_m = round(desp / qtd_despachos) if qtd_despachos > 0 else 0
+
+    # porcentagem de conclusão das demandas
+    demandas_total = demandas_count
+
+    demandas_conclu = db.session.query(Demanda, User.coord)\
+                                .join(User, Demanda.user_id == User.id)\
+                                .filter(Demanda.conclu == '1',
+                                        User.coord.like(coord))\
+                                .count()
+
+    percent_conclu = round((demandas_conclu / demandas_total) * 100) if demandas_total != 0 else 0
+
+    # média, maior quantidade e menor quantidade de demandas por colaborador ativo.
+    colaborador_demandas = db.session.query(Demanda.user_id, label('qtd', func.count(Demanda.user_id)))\
+                                     .join(User, Demanda.user_id == User.id)\
+                                     .filter(User.coord.like(coord))\
+                                     .group_by(Demanda.user_id)
+
+    pessoas = db.session.query(User.id, User.ativo).filter(User.coord.like(coord)).all()
+
+    qtd_demandas = []
+    for c_d in colaborador_demandas:
+        for p in pessoas:
+            if c_d.user_id == p.id:
+                if p.ativo == 1:
+                    qtd_demandas.append(c_d.qtd)
+
+    if len(qtd_demandas) > 0:
+        qtd_demandas_max = max(qtd_demandas)
+        qtd_demandas_min = min(qtd_demandas)
+        qtd_demandas_avg = round(sum(qtd_demandas) / len(qtd_demandas))
+    else:
+        qtd_demandas_max = 0
+        qtd_demandas_min = 0
+        qtd_demandas_avg = 0
+
+    # média de demandas, providências e despachos por mês nos últimos 12 meses
+    meses = []
+    for i in range(12):
+        m = hoje.month - i
+        y = hoje.year
+        if m < 1:
+            m += 12
+            y -= 1
+        if m >= 0 and m < 10:
+            m = '0' + str(m)
+        meses.append((str(m), str(y)))
+
+    demandas_12meses = [db.session.query(Demanda)
+                              .join(User, Demanda.user_id == User.id)
+                              .filter(Demanda.data >= mes[1] + '-' + mes[0] + '-01',
+                                      Demanda.data <= mes[1] + '-' + mes[0] + '-' + str(monthrange(int(mes[1]), int(mes[0]))[1]),
+                                      User.coord.like(coord))
+                              .count()
+                        for mes in meses]
+
+    med_dm = round(sum(demandas_12meses) / len(demandas_12meses))
+    max_dm = max(demandas_12meses)
+    min_dm = min(demandas_12meses)
+    if med_dm != 0:
+        mes_max_dm = meses[demandas_12meses.index(max_dm)]
+        mes_min_dm = meses[demandas_12meses.index(min_dm)]
+    else:
+        mes_max_dm = 0
+        mes_min_dm = 0
+
+    providencias_12meses = [db.session.query(Providencia)
+                                  .join(User, Providencia.user_id == User.id)
+                                  .filter(Providencia.data >= mes[1] + '-' + mes[0] + '-01',
+                                          Providencia.data <= mes[1] + '-' + mes[0] + '-' + str(monthrange(int(mes[1]), int(mes[0]))[1]),
+                                          User.coord.like(coord))
+                                  .count()
+                            for mes in meses]
+
+    med_pr = round(sum(providencias_12meses) / len(providencias_12meses))
+    max_pr = max(providencias_12meses)
+    min_pr = min(providencias_12meses)
+    if med_pr != 0:
+        mes_max_pr = meses[providencias_12meses.index(max_pr)]
+        mes_min_pr = meses[providencias_12meses.index(min_pr)]
+    else:
+        mes_max_pr = 0
+        mes_min_pr = 0
+
+    despachos_12meses = [db.session.query(Despacho)
+                               .join(User, Despacho.user_id == User.id)
+                               .filter(Despacho.data >= mes[1] + '-' + mes[0] + '-01',
+                                       Despacho.data <= mes[1] + '-' + mes[0] + '-' + str(monthrange(int(mes[1]), int(mes[0]))[1]),
+                                       User.coord.like(coord))
+                               .count()
+                         for mes in meses]
+
+    med_dp = round(sum(despachos_12meses) / len(despachos_12meses))
+    max_dp = max(despachos_12meses)
+    min_dp = min(despachos_12meses)
+    if med_dp != 0:
+        mes_max_dp = meses[despachos_12meses.index(max_dp)]
+        mes_min_dp = meses[despachos_12meses.index(min_dp)]
+    else:
+        mes_max_dp = 0
+        mes_min_dp = 0
+
+    return {
+        'demandas_count': demandas_count,
+        'demandas_por_tipo': demandas_por_tipo,
+        'demandas_por_tipo_ano_anterior': demandas_por_tipo_ano_anterior,
+        'demandas_por_tipo_ano_corrente': demandas_por_tipo_ano_corrente,
+        'demandas_por_tipo_12meses': demandas_por_tipo_12meses,
+        'demandas_tipos': demandas_tipos,
+        'vida_m_por_tipo': vida_m_por_tipo,
+        'vida_m': vida_m,
+        'desp_m': desp_m,
+        'percent_conclu': percent_conclu,
+        'vida_m_ano': vida_m_ano,
+        'qtd_demandas_max': qtd_demandas_max,
+        'qtd_demandas_min': qtd_demandas_min,
+        'qtd_demandas_avg': qtd_demandas_avg,
+        'med_dm': med_dm, 'max_dm': max_dm, 'mes_max_dm': mes_max_dm, 'min_dm': min_dm, 'mes_min_dm': mes_min_dm,
+        'med_pr': med_pr, 'max_pr': max_pr, 'mes_max_pr': mes_max_pr, 'min_pr': min_pr, 'mes_min_pr': mes_min_pr,
+        'med_dp': med_dp, 'max_dp': max_dp, 'mes_max_dp': mes_max_dp, 'min_dp': min_dp, 'mes_min_dp': mes_min_dp,
+    }
+
+
+def estatisticas_usuario(usu):
+    """
+    Calcula as estatísticas de um usuário específico: quantidade de
+    demandas, taxa de conclusão, vida média, prazo médio de despacho,
+    e médias mensais/semanais de dedicação.
+
+    Corrige bug real (mesmo padrão já corrigido em
+    users/services.py:calcular_estatisticas_conta): as consultas
+    `user_demandas`/`user_demandas_conclu` usam GROUP BY, que retorna
+    uma lista VAZIA (não uma linha com contagem 0) quando o usuário
+    não tem nenhuma demanda — acessar `[0][1]` diretamente quebrava
+    com IndexError para qualquer usuário sem demandas.
+    """
+    hoje = date.today()
+
+    usuario = db.session.query(User).filter(User.id == usu).first()
+
+    user_demandas = db.session.query(Demanda.user_id, func.count(Demanda.user_id))\
+                              .filter(Demanda.user_id == usu)\
+                              .group_by(Demanda.user_id).first()
+
+    qtd_demandas = user_demandas[1] if user_demandas else 0
+
+    user_demandas_conclu = db.session.query(Demanda.user_id, func.count(Demanda.user_id))\
+                                     .filter(Demanda.user_id == usu, Demanda.conclu == '1')\
+                                     .group_by(Demanda.user_id).first()
+
+    qtd_demandas_conclu = user_demandas_conclu[1] if user_demandas_conclu else 0
+
+    percent_conclu = round((qtd_demandas_conclu / qtd_demandas) * 100) if qtd_demandas != 0 else 0
+
+    ## calcula a vida média das demandas do usuário
+    demandas_datas = db.session.query(Demanda.data, Demanda.data_conclu)\
+                               .filter(Demanda.conclu == '1', Demanda.data_conclu != None, Demanda.user_id == usu)
+
+    vida = 0
+    for dia in demandas_datas:
+        vida += (dia.data_conclu - dia.data).days
+
+    qtd_datas = len(list(demandas_datas))
+    vida_m = round(vida / qtd_datas) if qtd_datas > 0 else 0
+
+    ## calcula o prazo médio dos despachos
+    despachos = db.session.query(label('c_data', Despacho.data), Despacho.demanda_id,
+                                 Demanda.id, label('i_data', Demanda.data))\
+                          .outerjoin(Demanda, Despacho.demanda_id == Demanda.id)\
+                          .filter(Demanda.user_id == usu)\
+                          .all()
+
+    desp = 0
+    for despacho in despachos:
+        desp += (despacho.c_data - despacho.i_data).days
+
+    qtd_despachos = len(list(despachos))
+    desp_m = round(desp / qtd_despachos) if qtd_despachos > 0 else 0
+
+    ## média de demandas, providências e despachos por mês nos últimos 12 meses
+    meses = []
+    for i in range(12):
+        m = hoje.month - i - 1
+        y = hoje.year
+        if m < 1:
+            m += 12
+            y -= 1
+        if m >= 0 and m < 10:
+            m = '0' + str(m)
+        meses.append((str(m), str(y)))
+
+    demandas_12meses = [Demanda.query.filter(Demanda.data >= mes[1] + '-' + mes[0] + '-01',
+                                             Demanda.data <= mes[1] + '-' + mes[0] + '-' + str(monthrange(int(mes[1]), int(mes[0]))[1]),
+                                             Demanda.user_id == usu).count()
+                                             for mes in meses]
+
+    med_dm = round(sum(demandas_12meses) / len(demandas_12meses))
+    max_dm = max(demandas_12meses)
+    mes_max_dm = meses[demandas_12meses.index(max_dm)]
+    min_dm = min(demandas_12meses)
+    mes_min_dm = meses[demandas_12meses.index(min_dm)]
+
+    providencias_12meses = [Providencia.query.filter(Providencia.data >= mes[1] + '-' + mes[0] + '-01',
+                                             Providencia.data <= mes[1] + '-' + mes[0] + '-' + str(monthrange(int(mes[1]), int(mes[0]))[1]),
+                                             Providencia.user_id == usu).count()
+                                             for mes in meses]
+
+    med_pr = round(sum(providencias_12meses) / len(providencias_12meses))
+    max_pr = max(providencias_12meses)
+    mes_max_pr = meses[providencias_12meses.index(max_pr)]
+    min_pr = min(providencias_12meses)
+    mes_min_pr = meses[providencias_12meses.index(min_pr)]
+
+    minutos_dedicados_12meses = [db.session.query(func.sum(Providencia.duracao)).filter(Providencia.data >= mes[1] + '-' + mes[0] + '-01',
+                                             Providencia.data <= mes[1] + '-' + mes[0] + '-' + str(monthrange(int(mes[1]), int(mes[0]))[1]),
+                                             Providencia.user_id == usu).all()
+                                             for mes in meses]
+
+    minutos_log_man_12meses = [db.session.query(func.sum(Log_Auto.duracao)).filter(Log_Auto.data_hora >= mes[1] + '-' + mes[0] + '-01',
+                                             Log_Auto.data_hora <= mes[1] + '-' + mes[0] + '-' + str(monthrange(int(mes[1]), int(mes[0]))[1]),
+                                             Log_Auto.user_id == usu).all()
+                                             for mes in meses]
+
+    hd_p = [m[0][0] if m[0][0] is not None else 0 for m in minutos_dedicados_12meses]
+    hd_l = [m[0][0] if m[0][0] is not None else 0 for m in minutos_log_man_12meses]
+    hd = [x + y for (x, y) in zip(hd_p, hd_l)]
+
+    med_hd = round((sum(hd) / len(hd)) / 60)
+    max_hd = round(max(hd) / 60)
+    mes_max_hd = meses[hd.index(max(hd))]
+    min_hd = round(min(hd) / 60)
+    mes_min_hd = meses[hd.index(min(hd))]
+
+    start = hoje - timedelta(days=hoje.weekday())
+    end = start + timedelta(days=6)
+
+    minutos_dedicados_semana_p = db.session.query(func.sum(Providencia.duracao)).filter(Providencia.data >= start,
+                                             Providencia.data <= end,
+                                             Providencia.user_id == usu).all()
+
+    minutos_dedicados_semana_l = db.session.query(func.sum(Log_Auto.duracao)).filter(Log_Auto.data_hora >= start,
+                                          Log_Auto.data_hora <= end,
+                                          Log_Auto.user_id == usu).all()
+
+    md_p = minutos_dedicados_semana_p[0][0] or 0
+    md_l = minutos_dedicados_semana_l[0][0] or 0
+
+    horas_dedicadas_semana = round((md_p + md_l) / 60)
+
+    return {
+        'usuario': usuario,
+        'qtd_demandas': qtd_demandas,
+        'qtd_demandas_conclu': qtd_demandas_conclu,
+        'percent_conclu': percent_conclu,
+        'vida_m': vida_m,
+        'desp_m': desp_m,
+        'med_dm': med_dm, 'max_dm': max_dm, 'mes_max_dm': mes_max_dm, 'min_dm': min_dm, 'mes_min_dm': mes_min_dm,
+        'med_pr': med_pr, 'max_pr': max_pr, 'mes_max_pr': mes_max_pr, 'min_pr': min_pr, 'mes_min_pr': mes_min_pr,
+        'med_hd': med_hd, 'max_hd': max_hd, 'mes_max_hd': mes_max_hd, 'min_hd': min_hd, 'mes_min_hd': mes_min_hd,
+        'horas': horas_dedicadas_semana,
+    }
