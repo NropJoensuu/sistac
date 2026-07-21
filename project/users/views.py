@@ -379,6 +379,80 @@ def admin_view_users():
         return render_template('admin_view_users.html', users=users)
 
 #
+## confirma manualmente o e-mail de um usuário (ex: link de confirmação expirado)
+
+@users.route('/<int:user_id>/admin_confirma_email', methods=['GET', 'POST'])
+@login_required
+def admin_confirma_email(user_id):
+    """
+    +---------------------------------------------------------------------------------------+
+    |Permite que o admin confirme manualmente o e-mail de um usuário.                        |
+    |Útil quando o link de confirmação expirou e a pessoa não consegue se cadastrar de novo   |
+    |(o e-mail já está em uso por um cadastro pendente).                                      |
+    |                                                                                        |
+    |Recebe o ID do usuário como parâmetro.                                                  |
+    +---------------------------------------------------------------------------------------+
+    """
+    if current_user.role[0:5] != 'admin':
+        abort(403)
+
+    services.confirmar_email_manualmente(user_id, current_user.id)
+
+    flash('E-mail confirmado manualmente! O usuário já pode fazer login.', 'sucesso')
+
+    return redirect(url_for('users.admin_view_users'))
+
+## reenvia o e-mail de confirmação de cadastro
+
+@users.route('/<int:user_id>/admin_reenvia_confirmacao', methods=['GET', 'POST'])
+@login_required
+def admin_reenvia_confirmacao(user_id):
+    """
+    +---------------------------------------------------------------------------------------+
+    |Permite que o admin dispare novamente o e-mail de confirmação de cadastro de um usuário.|
+    |                                                                                        |
+    |Recebe o ID do usuário como parâmetro.                                                  |
+    +---------------------------------------------------------------------------------------+
+    """
+    if current_user.role[0:5] != 'admin':
+        abort(403)
+
+    services.reenviar_confirmacao_email(user_id, current_user.id)
+
+    flash('E-mail de confirmação reenviado!', 'sucesso')
+
+    return redirect(url_for('users.admin_view_users'))
+
+## exclui o cadastro de um usuário (restrito a cadastros ainda não confirmados)
+
+@users.route('/<int:user_id>/admin_exclui_usuario', methods=['GET', 'POST'])
+@login_required
+def admin_exclui_usuario(user_id):
+    """
+    +---------------------------------------------------------------------------------------+
+    |Permite que o admin exclua o cadastro de um usuário — restrito a cadastros com e-mail   |
+    |ainda não confirmado, para não apagar contas ativas com dados/histórico já vinculados.  |
+    |                                                                                        |
+    |Recebe o ID do usuário como parâmetro.                                                  |
+    +---------------------------------------------------------------------------------------+
+    """
+    if current_user.role[0:5] != 'admin':
+        abort(403)
+
+    if user_id == current_user.id:
+        flash('Você não pode excluir seu próprio cadastro por aqui.', 'erro')
+        return redirect(url_for('users.admin_view_users'))
+
+    status = services.excluir_usuario_admin(user_id, current_user.id)
+
+    if status == 'excluido':
+        flash('Cadastro excluído!', 'sucesso')
+    else:
+        flash('Só é possível excluir cadastros com e-mail ainda não confirmado.', 'erro')
+
+    return redirect(url_for('users.admin_view_users'))
+
+#
 ## alterações em users pelo admin
 
 @users.route("/<int:user_id>/admin_update_user", methods=['GET', 'POST'])

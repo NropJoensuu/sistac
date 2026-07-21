@@ -670,6 +670,55 @@ def buscar_usuario(user_id):
     return User.query.get_or_404(user_id)
 
 
+def confirmar_email_manualmente(user_id, admin_id):
+    """
+    Permite que um admin confirme manualmente o e-mail de um usuário
+    (ex: quando o link de confirmação expirou e a pessoa não consegue
+    se cadastrar de novo, pois o e-mail já está em uso).
+    """
+    user = buscar_usuario(user_id)
+
+    user.email_confirmed = 1
+    user.email_confirmed_on = datetime.now()
+    db.session.commit()
+
+    registra_log_auto(admin_id, None, 'cem')
+
+    return user
+
+
+def reenviar_confirmacao_email(user_id, admin_id):
+    """Permite que um admin dispare novamente o e-mail de confirmação de cadastro de um usuário."""
+    user = buscar_usuario(user_id)
+
+    send_confirmation_email(user.email)
+
+    registra_log_auto(admin_id, None, 'rem')
+
+    return user
+
+
+def excluir_usuario_admin(user_id, admin_id):
+    """
+    Permite que um admin exclua o cadastro de um usuário — restrito a
+    cadastros com e-mail ainda não confirmado, para evitar excluir
+    contas ativas com demandas/log já vinculados (o que quebraria por
+    violação de chave estrangeira, além de apagar histórico real).
+    Retorna 'excluido' ou 'confirmado' (recusa a exclusão).
+    """
+    user = buscar_usuario(user_id)
+
+    if user.email_confirmed == 1:
+        return 'confirmado'
+
+    db.session.delete(user)
+    db.session.commit()
+
+    registra_log_auto(admin_id, None, 'xus')
+
+    return 'excluido'
+
+
 def coords_choices():
     """Retorna a lista de coordenações formatada para um SelectField."""
     coords = db.session.query(Coords.sigla).order_by(Coords.sigla).all()

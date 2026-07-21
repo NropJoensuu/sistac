@@ -13,6 +13,7 @@
 /project/users/__pycache__
 /compose.yaml
 /project/static/convenio.pdf
+/project/static/procedimentos.pdf
 /project/static/convenios.csv
 /project/static/acordos.csv
 /instance/flask.cfg

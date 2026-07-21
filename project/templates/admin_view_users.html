@@ -21,6 +21,7 @@
             <th align="center">E-mail conf. em</th>
             <th align="center">Último login</th>
             <th align="center">Ativo?</th>
+            <th align="center">Ações</th>
             </tr>
         </thead>
         <tbody>
@@ -44,6 +45,13 @@
               <td align="center"> {% if user.email_confirmed_on != None %} {{user.email_confirmed_on.strftime('%x')}} {% endif %}</td>
               <td align="center"> {% if user.current_logged_in != None %} {{user.current_logged_in.strftime('%c')}} {% endif %}</td>
               <td align="center"> {% if user.ativo == 1 %} Sim {% else %} Não {% endif %} </td>
+              <td align="center">
+                {% if user.email_confirmed != 1 %}
+                  <a href="{{url_for('users.admin_confirma_email', user_id=user.id)}}" class="btn btn-sm btn-outline-success" title="Confirma o e-mail manualmente, liberando o login imediatamente">Confirmar</a>
+                  <a href="{{url_for('users.admin_reenvia_confirmacao', user_id=user.id)}}" class="btn btn-sm btn-outline-primary" title="Reenvia o e-mail de confirmação de cadastro">Reenviar</a>
+                  <a href="{{url_for('users.admin_exclui_usuario', user_id=user.id)}}" class="btn btn-sm btn-outline-danger" title="Exclui o cadastro (só é possível enquanto o e-mail não foi confirmado)" onclick="return confirm('Excluir o cadastro de {{ user.username }}? Isso não pode ser desfeito.');">Excluir</a>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
