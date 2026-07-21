@@ -991,7 +991,6 @@ def list_pesquisa(pesq):
 #################################################################
 
 #CRIANDO um despacho
-#CRIANDO um despacho
 
 @demandas.route('/<int:demanda_id>/cria_despacho',methods=['GET','POST'])
 @login_required
@@ -1011,125 +1010,19 @@ def cria_despacho(demanda_id):
 
     tipo = db.session.query(Tipos_Demanda.id).filter(Tipos_Demanda.tipo == demanda.tipo).first()
 
-    # o choices do campo passos são definidos aqui e não no form
-    passos = db.session.query(Passos_Tipos.passo, Passos_Tipos.ordem).filter(Passos_Tipos.tipo_id == tipo.id).order_by(Passos_Tipos.ordem).all()
-    qtd = len(passos)
-    lista_passos = [('('+str(p[1])+'/'+str(qtd)+') '+p[0],'('+str(p[1])+'/'+str(qtd)+') '+p[0]) for p in passos]
-    lista_passos.insert(0,('',''))
     form = DespachoForm()
-    form.passo.choices = lista_passos
+    form.passo.choices = services.passos_choices_do_tipo(tipo.id)
 
     if form.validate_on_submit():
 
-        if form.passo.data == None:
-            passo = ''
-        else:
-            passo = form.passo.data
-
-        despacho = Despacho(data       = datetime.now(),
-                            user_id    = current_user.id,
-                            demanda_id = demanda_id,
-                            texto      = form.texto.data,
-                            passo      = passo)
-
-        db.session.add(despacho)
-        db.session.commit()
-
-        registra_log_auto(current_user.id,demanda_id,'des')
-
-        # marca a demanda quanto à necessidade de despacho da CG
-        # e desmarca, dependendo de quem deu o despacho.
-        if form.necessita_despacho_cg.data:
-            demanda.necessita_despacho_cg = 1
-        else:
-            demanda.necessita_despacho_cg = 0
-
-        if form.necessita_despacho_cg == 1:
-            demanda.data_env_despacho = datetime.now()
-
-        if current_user.despacha == 1 or current_user.despacha0 == 1:
-            demanda.necessita_despacho = 0
-
-        if current_user.despacha2 == 1 and current_user.despacha == 0:
-            demanda.necessita_despacho_cg = 0
-
-        db.session.commit()
-
-        # registra data de conclusão da demanda, caso o despachante use desta prerrogativa
-        if form.conclu.data != '0':
-
-            demanda.necessita_despacho    = 0
-            demanda.necessita_despacho_cg = 0
-
-            if demanda.conclu == '0':
-
-                # enviar e-mail para chefes sobre demanda concluida
-                chefes_emails = db.session.query(User.email)\
-                                          .filter(or_(User.despacha == 1,User.despacha0 == 1),
-                                                  User.coord == current_user.coord)
-
-                destino = []
-                for email in chefes_emails:
-                    destino.append(email[0])
-                destino.append(current_user.email)
-
-                if len(destino) > 1:
-
-                    sistema = db.session.query(Sistema.nome_sistema).first()
-
-                    html = render_template('email_demanda_conclu.html',demanda=demanda_id,user=current_user.username,
-                                            titulo=demanda.titulo, sistema=sistema.nome_sistema)
-
-                    pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==demanda.programa).first()
-
-                    send_email('Demanda ' + str(demanda_id) + ' foi concluída (' + pt.atividade_sigla + ')', destino,'', html)
-
-                    msg = Msgs_Recebidas(user_id    = demanda.user_id,
-                                         data_hora  = datetime.now(),
-                                         demanda_id = demanda_id,
-                                         msg        = 'A demanda foi concluída!')
-
-                    db.session.add(msg)
-                    db.session.commit()
-
-            demanda.conclu      = form.conclu.data
-            demanda.data_conclu = datetime.now()
-            db.session.commit()
-            registra_log_auto(current_user.id,demanda_id,'alt')
-
-        else:
-
-            demanda.conclu = '0'
-            db.session.commit()
-
-        #
-        # envia e-mail par ao responsável pela demanda
-
-        dono_email = db.session.query(User.email,User.username).filter(User.id == demanda.user_id).first()
-
-        destino = []
-
-        destino.append(dono_email.email)
-        destino.append(current_user.email)
-
-        sistema = db.session.query(Sistema.nome_sistema).first()
-
-        html = render_template('email_despacho_emitido.html',demanda=demanda_id,user=current_user.username,
-                                dono=dono_email.username,titulo=demanda.titulo, sistema=sistema.nome_sistema)
-
-        pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==demanda.programa).first()
-
-        send_email('Demanda ' + str(demanda_id) + ' recebeu um Despacho (' + pt.atividade_sigla + ')', destino,'', html)
-
-        msg = Msgs_Recebidas(user_id    = demanda.user_id,
-                             data_hora  = datetime.now(),
-                             demanda_id = demanda_id,
-                             msg        = 'A demanda recebeu um despacho!')
-
-        db.session.add(msg)
-        db.session.commit()
-
-        # avisa que despacho foi criado e mostra a demanda
+        services.criar_despacho(
+            demanda_id=demanda_id,
+            texto=form.texto.data,
+            passo_data=form.passo.data,
+            necessita_despacho_cg=form.necessita_despacho_cg.data,
+            conclu=form.conclu.data,
+            usuario=current_user,
+        )
 
         flash ('Despacho criado!','sucesso')
 
@@ -1177,11 +1070,7 @@ def afere_demanda(demanda_id):
 
     if form.validate_on_submit():
 
-        demanda.nota = form.nota.data
-
-        db.session.commit()
-
-        registra_log_auto(current_user.id,demanda_id,'afe')
+        services.aferir_demanda(demanda_id, form.nota.data, current_user.id)
 
         flash ('Demanda aferida!','sucesso')
 
@@ -1218,242 +1107,26 @@ def cria_providencia(demanda_id):
 
     tipo = db.session.query(Tipos_Demanda.id).filter(Tipos_Demanda.tipo == demanda.tipo).first()
 
-    # o choices do campo passos são definidos aqui e não no form
-    passos = db.session.query(Passos_Tipos.passo, Passos_Tipos.ordem).filter(Passos_Tipos.tipo_id == tipo.id).order_by(Passos_Tipos.ordem).all()
-    qtd = len(passos)
-    lista_passos = [('('+str(p[1])+'/'+str(qtd)+') '+p[0],'('+str(p[1])+'/'+str(qtd)+') '+p[0]) for p in passos]
-    lista_passos.insert(0,('',''))
     form = ProvidenciaForm()
-    form.passo.choices = lista_passos
+    form.passo.choices = services.passos_choices_do_tipo(tipo.id)
 
     if form.validate_on_submit():
 
-        if form.data_hora.data > datetime.now():
-            programada = 1
-        else:
-            programada = 0
+        demanda, agendada = services.criar_providencia(
+            demanda_id=demanda_id,
+            data_hora=form.data_hora.data,
+            texto=form.texto.data,
+            duracao=form.duracao.data,
+            passo_data=form.passo.data,
+            necessita_despacho=form.necessita_despacho.data,
+            conclu=form.conclu.data,
+            agenda=form.agenda.data,
+            usuario=current_user,
+        )
 
-        if form.passo.data == None:
-            passo = ''
-        else:
-            passo = form.passo.data
-
-        providencia = Providencia(demanda_id = demanda_id,
-                                  data       = form.data_hora.data,
-                                  texto      = form.texto.data,
-                                  user_id    = current_user.id,
-                                  duracao    = form.duracao.data,
-                                  programada = programada,
-                                  passo      = passo)
-
-        db.session.add(providencia)
-        db.session.commit()
-
-        if programada == 1:
-            registra_log_auto(current_user.id,demanda_id,'age',demanda.programa,form.duracao.data)
-        else:
-            registra_log_auto(current_user.id,demanda_id,'pro',demanda.programa,form.duracao.data)
-
-# para o caso da providência exigir um despacho
-        if form.necessita_despacho.data == True:
-
-            # enviar e-mail para chefes, user que registrou a providência e dono da demanda
-            if demanda.necessita_despacho == 0:
-
-                chefes_emails = db.session.query(User.email,User.id)\
-                                          .filter(or_(User.despacha == 1,User.despacha0 == 1),
-                                                  User.coord == current_user.coord)
-
-                dono_email = db.session.query(User.email,User.id).filter(User.id == demanda.user_id).first()
-
-                destino = []
-                for email in chefes_emails:
-                    destino.append(email[0])
-                destino.append(current_user.email)
-                destino.append(dono_email.email)
-
-                if len(destino) > 1:
-
-                    sistema = db.session.query(Sistema.nome_sistema).first()
-
-                    html = render_template('email_pede_despacho.html',demanda=demanda_id,user=current_user.username,
-                                            titulo=demanda.titulo,sistema=sistema.nome_sistema,tipo=demanda.tipo)
-
-                    pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==demanda.programa).first()
-
-                    send_email('Demanda ' + str(demanda_id) + ' requer despacho (' + pt.atividade_sigla + ')', destino,'', html)
-
-                    for user in chefes_emails:
-                        msg = Msgs_Recebidas(user_id    = user.id,
-                                             data_hora  = datetime.now(),
-                                             demanda_id = demanda_id,
-                                             msg        = 'Chefia, a demanda está pedindo um despacho!')
-                        db.session.add(msg)
-
-                    msg = Msgs_Recebidas(user_id    = current_user.id,
-                                         data_hora  = datetime.now(),
-                                         demanda_id = demanda_id,
-                                         msg        = 'Você marcou a opção -Necessita despacho?- na demanda!')
-                    db.session.add(msg)
-
-                    if dono_email.id != current_user.id:
-
-                        msg = Msgs_Recebidas(user_id    = dono_email.id,
-                                             data_hora  = datetime.now(),
-                                             demanda_id = demanda_id,
-                                             msg        = 'A opção -Necessita despacho?- foi marcada na sua demanda!')
-                        db.session.add(msg)
-
-                    db.session.commit()
-
-            demanda.necessita_despacho = 1
-            demanda.necessita_despacho_cg = 0
-            demanda.data_env_despacho = datetime.now()
-
-        else:
-
-            demanda.necessita_despacho = 0
-
-        if demanda.user_id == current_user.id:
-
-            if form.conclu.data != '0':
-
-                if demanda.conclu == '0':
-                    demanda.conclu = form.conclu.data
-                    demanda.data_conclu = datetime.now()
-                    demanda.necessita_despacho = 0
-                    demanda.necessita_despacho_cg = 0
-                    #
-                    # enviar e-mail para chefes sobre demanda concluida
-                    chefes_emails = db.session.query(User.email)\
-                                              .filter(or_(User.despacha == 1,User.despacha0 == 1),
-                                                      User.coord == current_user.coord)
-
-                    destino = []
-                    for email in chefes_emails:
-                        destino.append(email[0])
-                    destino.append(current_user.email)
-
-                    if len(destino) > 1:
-
-                        sistema = db.session.query(Sistema.nome_sistema).first()
-
-                        html = render_template('email_demanda_conclu.html',demanda=demanda_id,user=current_user.username,
-                                                titulo=demanda.titulo,sistema=sistema.nome_sistema)
-
-                        pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==demanda.programa).first()
-
-                        send_email('Demanda ' + str(demanda_id) + ' foi concluída (' + pt.atividade_sigla + ')', destino,'', html)
-
-                        msg = Msgs_Recebidas(user_id    = demanda.user_id,
-                                             data_hora  = datetime.now(),
-                                             demanda_id = demanda_id,
-                                             msg        = 'A demanda foi concluída!')
-
-                        db.session.add(msg)
-                        db.session.commit()
-
-
-                    registra_log_auto(current_user.id,demanda_id,'alt')
-            else:
-                demanda.conclu = '0'
-                demanda.data_conclu = None
-
-        db.session.commit()
-
-        if demanda.user_id != current_user.id:
-
-            dono_email = db.session.query(User.email,User.username).filter(User.id == demanda.user_id).first()
-
-            destino = []
-
-            destino.append(dono_email.email)
-            destino.append(current_user.email)
-
-            if len(destino) > 1:
-
-                sistema = db.session.query(Sistema.nome_sistema).first()
-
-                html = render_template('email_provi_alheia.html',demanda=demanda_id,user=current_user.username,
-                                        dono=dono_email.username,titulo=demanda.titulo,sistema=sistema.nome_sistema)
-
-                pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id==demanda.programa).first()
-
-                send_email('Demanda ' + str(demanda_id) + ' com providência alheia (' + pt.atividade_sigla + ')', destino,'', html)
-
-                msg = Msgs_Recebidas(user_id    = demanda.user_id,
-                                     data_hora  = datetime.now(),
-                                     demanda_id = demanda_id,
-                                     msg        = 'A demanda recebeu uma providência alheia!')
-
-                db.session.add(msg)
-                db.session.commit()
-
-
-        if programada == 1 and form.agenda.data:
-
-            # cria evento no google agenda quando a providência for futura e o usuário assim o desejar
-            scopes = ['https://www.googleapis.com/auth/calendar.events']
-
-            if getattr(sys, 'frozen', False):
-                base_path = sys._MEIPASS
-                client_file = os.path.join(base_path, 'client.json')
-            else:
-                client_file = 'client.json'
-
-            flow = InstalledAppFlow.from_client_secrets_file(client_file, scopes=scopes)
-
-            # o flow acima apresenta um link enorme para que o usário concorde com o
-            # SICOPES acessando sua agenda, mas isto só precisa ser feito uma vez, abaixo
-            # as credenciais são armazenadas e usadas nos outros agendamentos
-
-            pasta_token_antiga = os.path.normpath('/temp/token.pkl')
-            pasta_token = os.path.normpath('/temp/token/token.pkl')
-
-            if os.path.exists(pasta_token_antiga):
-                os.makedirs(os.path.normpath('/temp/token/'))
-                os.system('copy '+ pasta_token_antiga +' '+pasta_token)
-                os.remove(pasta_token_antiga)
-
-            if os.path.exists(pasta_token):
-                credentials = pickle.load(open(pasta_token, "rb"))
-            else:
-                credentials = flow.run_console()
-                pickle.dump(credentials, open(pasta_token, "wb"))
-
-            service = build("calendar", "v3", credentials=credentials)
-
-            ini = form.data_hora.data
-            fim = ini + timedelta(minutes=form.duracao.data)
-            timezone = 'America/Sao_Paulo'
-
-            event = {
-                      'summary': 'Demanda ' + str(demanda.id) + ' - Providência agendada',
-                      'location': 'CNPq',
-                      'description': form.texto.data,
-                      'start': {
-                        'dateTime': ini.strftime("%Y-%m-%dT%H:%M:%S"),
-                        'timeZone': timezone,
-                      },
-                      'end': {
-                        'dateTime': fim.strftime("%Y-%m-%dT%H:%M:%S"),
-                        'timeZone': timezone,
-                      },
-                      'reminders': {
-                        'useDefault': False,
-                        'overrides': [
-                          {'method': 'email', 'minutes': 24 * 60},
-                          {'method': 'popup', 'minutes': 15},
-                        ],
-                      },
-                    }
-
-            service.events().insert(calendarId='primary', body=event).execute()
-
+        if agendada:
             flash ('Providência agendada!','sucesso')
-
         else:
-
             flash ('Providência criada!','sucesso')
 
         return redirect(url_for('demandas.demanda',demanda_id=demanda.id))

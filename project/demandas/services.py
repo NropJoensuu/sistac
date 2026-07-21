@@ -21,8 +21,12 @@ from flask_mail import Message
 from sqlalchemy import or_, func
 
 import os
-from datetime import date
+import sys
+import pickle
+from datetime import date, timedelta
 
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
 from fpdf import FPDF
 
 from project import db, mail, app
@@ -1300,3 +1304,301 @@ def executar_pesquisa(pesq, page):
     pro_des = providencias_e_despachos_todos()
 
     return demandas, demandas_count, pro_des, pesq_l
+
+
+# =============================================================================
+# Despacho / providência
+# =============================================================================
+
+def passos_choices_do_tipo(tipo_id):
+    """Retorna a lista de passos de um tipo de demanda, formatada para um SelectField."""
+    passos = db.session.query(Passos_Tipos.passo, Passos_Tipos.ordem)\
+                       .filter(Passos_Tipos.tipo_id == tipo_id)\
+                       .order_by(Passos_Tipos.ordem).all()
+
+    qtd = len(passos)
+    lista_passos = [
+        ('(' + str(p[1]) + '/' + str(qtd) + ') ' + p[0], '(' + str(p[1]) + '/' + str(qtd) + ') ' + p[0])
+        for p in passos
+    ]
+    lista_passos.insert(0, ('', ''))
+    return lista_passos
+
+
+def _notificar_despacho_emitido(demanda, atividade_id, usuario):
+    """Notifica o responsável pela demanda de que um despacho foi emitido."""
+    dono_email = db.session.query(User.email, User.username).filter(User.id == demanda.user_id).first()
+
+    destino = [dono_email.email, usuario.email]
+
+    sistema = db.session.query(Sistema.nome_sistema).first()
+
+    html = render_template('email_despacho_emitido.html', demanda=demanda.id, user=usuario.username,
+                            dono=dono_email.username, titulo=demanda.titulo, sistema=sistema.nome_sistema)
+
+    pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id == atividade_id).first()
+
+    send_email('Demanda ' + str(demanda.id) + ' recebeu um Despacho (' + pt.atividade_sigla + ')', destino, '', html)
+
+    msg = Msgs_Recebidas(user_id=demanda.user_id, data_hora=datetime.now(), demanda_id=demanda.id,
+                         msg='A demanda recebeu um despacho!')
+    db.session.add(msg)
+    db.session.commit()
+
+
+def criar_despacho(demanda_id, texto, passo_data, necessita_despacho_cg, conclu, usuario):
+    """
+    Registra um despacho de chefia para uma demanda. Sempre notifica
+    o responsável pela demanda por e-mail, e notifica os chefes se a
+    demanda for concluída pelo mesmo ato.
+
+    Corrige bug real: o código original checava `if
+    form.necessita_despacho_cg == 1:` (comparando o objeto do campo do
+    formulário, não seu valor `.data`) — essa condição nunca era
+    verdadeira, então `demanda.data_env_despacho` nunca era atualizado
+    nesse ponto.
+    """
+    demanda = Demanda.query.get_or_404(demanda_id)
+
+    passo = passo_data if passo_data is not None else ''
+
+    despacho = Despacho(data=datetime.now(), user_id=usuario.id, demanda_id=demanda_id,
+                        texto=texto, passo=passo)
+    db.session.add(despacho)
+    db.session.commit()
+
+    registra_log_auto(usuario.id, demanda_id, 'des')
+
+    if necessita_despacho_cg:
+        demanda.necessita_despacho_cg = 1
+        demanda.data_env_despacho = datetime.now()
+    else:
+        demanda.necessita_despacho_cg = 0
+
+    if usuario.despacha == 1 or usuario.despacha0 == 1:
+        demanda.necessita_despacho = 0
+
+    if usuario.despacha2 == 1 and usuario.despacha == 0:
+        demanda.necessita_despacho_cg = 0
+
+    db.session.commit()
+
+    if conclu != '0':
+        demanda.necessita_despacho = 0
+        demanda.necessita_despacho_cg = 0
+
+        if demanda.conclu == '0':
+            _notificar_demanda_concluida(demanda, demanda.titulo, demanda.programa, usuario)
+
+        demanda.conclu = conclu
+        demanda.data_conclu = datetime.now()
+        db.session.commit()
+
+        registra_log_auto(usuario.id, demanda_id, 'alt')
+
+    else:
+        demanda.conclu = '0'
+        db.session.commit()
+
+    _notificar_despacho_emitido(demanda, demanda.programa, usuario)
+
+    return demanda
+
+
+def aferir_demanda(demanda_id, nota, usuario_id):
+    """Registra a nota de aferição de uma demanda concluída."""
+    demanda = Demanda.query.get_or_404(demanda_id)
+
+    demanda.nota = nota
+    db.session.commit()
+
+    registra_log_auto(usuario_id, demanda_id, 'afe')
+
+    return demanda
+
+
+def _notificar_necessita_despacho_com_dono(demanda, atividade_id, usuario):
+    """
+    Notifica os chefes, o próprio usuário e o dono da demanda (se
+    diferente) de que uma providência marcou a necessidade de
+    despacho. Variante de `_notificar_necessita_despacho` usada apenas
+    por `criar_providencia`, que também avisa o dono da demanda.
+    """
+    chefes_emails = db.session.query(User.email, User.id)\
+                              .filter(or_(User.despacha == 1, User.despacha0 == 1),
+                                      User.coord == usuario.coord)
+
+    dono_email = db.session.query(User.email, User.id).filter(User.id == demanda.user_id).first()
+
+    destino = [e[0] for e in chefes_emails]
+    destino.append(usuario.email)
+    destino.append(dono_email.email)
+
+    if len(destino) > 1:
+        sistema = db.session.query(Sistema.nome_sistema).first()
+
+        html = render_template('email_pede_despacho.html', demanda=demanda.id, user=usuario.username,
+                                titulo=demanda.titulo, sistema=sistema.nome_sistema, tipo=demanda.tipo)
+
+        pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id == atividade_id).first()
+
+        send_email('Demanda ' + str(demanda.id) + ' requer despacho (' + pt.atividade_sigla + ')', destino, '', html)
+
+        for chefe in chefes_emails:
+            msg = Msgs_Recebidas(user_id=chefe.id, data_hora=datetime.now(), demanda_id=demanda.id,
+                                 msg='Chefia, a demanda está pedindo um despacho!')
+            db.session.add(msg)
+
+        msg = Msgs_Recebidas(user_id=usuario.id, data_hora=datetime.now(), demanda_id=demanda.id,
+                             msg='Você marcou a opção -Necessita despacho?- na demanda!')
+        db.session.add(msg)
+
+        if dono_email.id != usuario.id:
+            msg = Msgs_Recebidas(user_id=dono_email.id, data_hora=datetime.now(), demanda_id=demanda.id,
+                                 msg='A opção -Necessita despacho?- foi marcada na sua demanda!')
+            db.session.add(msg)
+
+        db.session.commit()
+
+
+def _notificar_providencia_alheia(demanda, atividade_id, usuario):
+    """Notifica o responsável pela demanda de que outra pessoa registrou uma providência nela."""
+    dono_email = db.session.query(User.email, User.username).filter(User.id == demanda.user_id).first()
+
+    destino = [dono_email.email, usuario.email]
+
+    if len(destino) > 1:
+        sistema = db.session.query(Sistema.nome_sistema).first()
+
+        html = render_template('email_provi_alheia.html', demanda=demanda.id, user=usuario.username,
+                                dono=dono_email.username, titulo=demanda.titulo, sistema=sistema.nome_sistema)
+
+        pt = db.session.query(Plano_Trabalho.atividade_sigla).filter(Plano_Trabalho.id == atividade_id).first()
+
+        send_email('Demanda ' + str(demanda.id) + ' com providência alheia (' + pt.atividade_sigla + ')', destino, '', html)
+
+        msg = Msgs_Recebidas(user_id=demanda.user_id, data_hora=datetime.now(), demanda_id=demanda.id,
+                             msg='A demanda recebeu uma providência alheia!')
+        db.session.add(msg)
+        db.session.commit()
+
+
+def _agendar_no_google_calendar(demanda, data_hora, duracao, texto):
+    """
+    +---------------------------------------------------------------------------------------+
+    | ATENÇÃO — funcionalidade preservada como estava, mas NÃO FUNCIONAL num servidor web:  |
+    | `flow.run_console()` implementa um fluxo OAuth interativo por linha de comando, que    |
+    | não tem como funcionar dentro de uma requisição HTTP de um servidor Flask (não há      |
+    | console para o usuário interagir). Mantido sem alteração — corrigir isso exigiria      |
+    | trocar para um fluxo OAuth web completo, o que é uma mudança de funcionalidade, não     |
+    | uma correção de bug simples. O caminho '/temp/token.pkl' também tem o mesmo problema    |
+    | de portabilidade já visto em outros pontos do sistema ('/temp' não é '/tmp').           |
+    +---------------------------------------------------------------------------------------+
+    """
+    scopes = ['https://www.googleapis.com/auth/calendar.events']
+
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+        client_file = os.path.join(base_path, 'client.json')
+    else:
+        client_file = 'client.json'
+
+    flow = InstalledAppFlow.from_client_secrets_file(client_file, scopes=scopes)
+
+    pasta_token_antiga = os.path.normpath('/temp/token.pkl')
+    pasta_token = os.path.normpath('/temp/token/token.pkl')
+
+    if os.path.exists(pasta_token_antiga):
+        os.makedirs(os.path.normpath('/temp/token/'))
+        os.system('copy ' + pasta_token_antiga + ' ' + pasta_token)
+        os.remove(pasta_token_antiga)
+
+    if os.path.exists(pasta_token):
+        credentials = pickle.load(open(pasta_token, "rb"))
+    else:
+        credentials = flow.run_console()
+        pickle.dump(credentials, open(pasta_token, "wb"))
+
+    service = build("calendar", "v3", credentials=credentials)
+
+    ini = data_hora
+    fim = ini + timedelta(minutes=duracao)
+    timezone = 'America/Sao_Paulo'
+
+    event = {
+        'summary': 'Demanda ' + str(demanda.id) + ' - Providência agendada',
+        'location': 'CNPq',
+        'description': texto,
+        'start': {'dateTime': ini.strftime("%Y-%m-%dT%H:%M:%S"), 'timeZone': timezone},
+        'end': {'dateTime': fim.strftime("%Y-%m-%dT%H:%M:%S"), 'timeZone': timezone},
+        'reminders': {
+            'useDefault': False,
+            'overrides': [
+                {'method': 'email', 'minutes': 24 * 60},
+                {'method': 'popup', 'minutes': 15},
+            ],
+        },
+    }
+
+    service.events().insert(calendarId='primary', body=event).execute()
+
+
+def criar_providencia(demanda_id, data_hora, texto, duracao, passo_data, necessita_despacho,
+                       conclu, agenda, usuario):
+    """
+    Registra uma providência para uma demanda, com toda a lógica de
+    notificação por e-mail e (opcionalmente) agendamento no Google
+    Calendar. Retorna uma tupla (demanda, agendada).
+    """
+    demanda = Demanda.query.get_or_404(demanda_id)
+
+    programada = 1 if data_hora > datetime.now() else 0
+    passo = passo_data if passo_data is not None else ''
+
+    providencia = Providencia(demanda_id=demanda_id, data=data_hora, texto=texto, user_id=usuario.id,
+                              duracao=duracao, programada=programada, passo=passo)
+    db.session.add(providencia)
+    db.session.commit()
+
+    if programada == 1:
+        registra_log_auto(usuario.id, demanda_id, 'age', demanda.programa, duracao)
+    else:
+        registra_log_auto(usuario.id, demanda_id, 'pro', demanda.programa, duracao)
+
+    # para o caso da providência exigir um despacho
+    if necessita_despacho:
+        if demanda.necessita_despacho == 0:
+            _notificar_necessita_despacho_com_dono(demanda, demanda.programa, usuario)
+
+        demanda.necessita_despacho = 1
+        demanda.necessita_despacho_cg = 0
+        demanda.data_env_despacho = datetime.now()
+    else:
+        demanda.necessita_despacho = 0
+
+    if demanda.user_id == usuario.id:
+        if conclu != '0':
+            if demanda.conclu == '0':
+                demanda.conclu = conclu
+                demanda.data_conclu = datetime.now()
+                demanda.necessita_despacho = 0
+                demanda.necessita_despacho_cg = 0
+
+                _notificar_demanda_concluida(demanda, demanda.titulo, demanda.programa, usuario)
+
+                registra_log_auto(usuario.id, demanda_id, 'alt')
+        else:
+            demanda.conclu = '0'
+            demanda.data_conclu = None
+
+    db.session.commit()
+
+    if demanda.user_id != usuario.id:
+        _notificar_providencia_alheia(demanda, demanda.programa, usuario)
+
+    agendada = False
+    if programada == 1 and agenda:
+        _agendar_no_google_calendar(demanda, data_hora, duracao, texto)
+        agendada = True
+
+    return demanda, agendada
