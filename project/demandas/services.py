@@ -26,10 +26,13 @@ from datetime import date
 from fpdf import FPDF
 
 from project import db, mail, app
+from sqlalchemy import cast, String
+from sqlalchemy.sql import label
+
 from project.models import (
     Log_Auto, Plano_Trabalho, Ativ_Usu, User, Coords, Tipos_Demanda,
     Passos_Tipos, Demanda, Providencia, Despacho, Sistema, DadosSEI,
-    Msgs_Recebidas, Acordo, grupo_programa_cnpq,
+    Msgs_Recebidas, Acordo, grupo_programa_cnpq, Proposta, Convenio,
 )
 
 
@@ -999,3 +1002,301 @@ def excluir_demanda(demanda_id, usuario_id):
     db.session.commit()
 
     registra_log_auto(usuario_id, demanda_id, 'del')
+
+
+# =============================================================================
+# Listagens / pesquisa
+# =============================================================================
+
+def providencias_e_despachos_todos():
+    """Retorna todas as providências e despachos do sistema, combinados e ordenados por data (mais recentes primeiro)."""
+    providencias = db.session.query(Providencia.demanda_id, Providencia.texto, Providencia.data,
+                                    Providencia.user_id, User.username.label('username'),
+                                    Providencia.programada, Providencia.passo)\
+                             .outerjoin(User, Providencia.user_id == User.id)\
+                             .order_by(Providencia.data.desc()).all()
+
+    despachos = db.session.query(Despacho.demanda_id, Despacho.texto, Despacho.data,
+                                 Despacho.user_id, (User.username + ' - DESPACHO').label('username'),
+                                 User.despacha, User.despacha2, User.despacha0, Despacho.passo)\
+                          .outerjoin(User, Despacho.user_id == User.id)\
+                          .order_by(Despacho.data.desc()).all()
+
+    pro_des = providencias + despachos
+    pro_des.sort(key=lambda ordem: ordem.data, reverse=True)
+
+    return pro_des
+
+
+def listar_demandas_paginado(page):
+    """Retorna todas as demandas, paginadas (8 por página), mais recentes primeiro."""
+    return db.session.query(Demanda.id, Demanda.programa, Demanda.sei, Demanda.convênio,
+                            Demanda.ano_convênio, Demanda.tipo, Demanda.data, Demanda.user_id,
+                            Demanda.titulo, Demanda.desc, Demanda.necessita_despacho,
+                            Demanda.conclu, Demanda.data_conclu, Demanda.necessita_despacho_cg,
+                            Demanda.urgencia, Demanda.data_env_despacho, Demanda.nota,
+                            Plano_Trabalho.atividade_sigla, User.coord, User.username)\
+                     .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Demanda.programa)\
+                     .outerjoin(User, User.id == Demanda.user_id)\
+                     .order_by(Demanda.data.desc())\
+                     .paginate(page=page, per_page=8)
+
+
+def _vida_media_por_tipo():
+    """Calcula a vida média (dias entre criação e conclusão) de cada tipo de demanda já concluído."""
+    demandas_conclu_por_tipo = db.session.query(Demanda.tipo, label('qtd', func.count(Demanda.id)))\
+                                          .filter(Demanda.conclu == '1')\
+                                          .order_by(Demanda.tipo)\
+                                          .group_by(Demanda.tipo)
+
+    vida_m_por_tipo_dict = {}
+
+    for tipo in demandas_conclu_por_tipo:
+        demandas_datas = db.session.query(Demanda.data, Demanda.data_conclu)\
+                                    .filter(Demanda.tipo == tipo.tipo, Demanda.data_conclu != None)
+
+        vida = 0
+        for dia in demandas_datas:
+            vida += (dia.data_conclu - dia.data).days
+
+        qtd_datas = len(list(demandas_datas))
+        vida_m = round(vida / qtd_datas) if qtd_datas > 0 else 0
+
+        vida_m_por_tipo_dict[tipo.tipo] = vida_m
+
+    return vida_m_por_tipo_dict
+
+
+def priorizar_demandas(peso_r, peso_d, peso_u, coord, resp):
+    """
+    Lista as demandas não concluídas em ordem de prioridade (lista
+    RDU), calculada a partir de relevância do tipo, distância em
+    relação à vida média esperada, e urgência marcada na demanda.
+    """
+    vida_m_por_tipo_dict = _vida_media_por_tipo()
+
+    hoje = datetime.today()
+
+    campos = (Demanda.id, Plano_Trabalho.atividade_sigla, Demanda.sei, Demanda.tipo,
+              Demanda.data, Demanda.necessita_despacho, Demanda.necessita_despacho_cg,
+              Demanda.urgencia, Demanda.convênio, User.username)
+
+    query = db.session.query(*campos)\
+                      .join(User, Demanda.user_id == User.id)\
+                      .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Demanda.programa)\
+                      .order_by(Demanda.data)
+
+    if coord == '*' and resp == '*':
+        demandas = query.filter(Demanda.conclu == '0').all()
+    else:
+        coord_filtro = '%' if coord == '*' else coord
+        resp_filtro = '%' if resp == '*' else resp
+
+        demandas = query.filter(Demanda.conclu == '0',
+                                User.coord.like(coord_filtro),
+                                User.id.like(resp_filtro)).all()
+
+    quantidade = len(demandas)
+
+    demandas_s = []
+
+    for demanda in demandas:
+        # identifica UF
+        if demanda.convênio != 0 and demanda.convênio != '':
+            uf = db.session.query(Proposta.UF_PROPONENTE)\
+                           .filter(Convenio.NR_CONVENIO == demanda.convênio)\
+                           .join(Convenio, Proposta.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
+                           .first()
+        else:
+            uf = db.session.query(Acordo.uf).filter_by(sei=demanda.sei).first()
+        if uf is None:
+            uf = ('*',)
+
+        # identifica relevância
+        relev = db.session.query(Tipos_Demanda.relevancia).filter_by(tipo=demanda.tipo).first()
+
+        # calcula distância (momento)
+        try:
+            alvo = vida_m_por_tipo_dict[demanda.tipo]
+        except KeyError:
+            alvo = 999
+
+        vigencia = (hoje - demanda.data).days
+
+        if alvo == 0:
+            distancia = 1
+        else:
+            if vigencia / alvo > 1.50:
+                distancia = 1
+            elif vigencia / alvo < 0.5:
+                distancia = 3
+            else:
+                distancia = 2
+
+        r_relevancia = relev.relevancia if relev else 0
+
+        demanda_s = list(demanda)
+        demanda_s.append(float(peso_r) * r_relevancia + float(peso_d) * distancia + float(peso_u) * demanda.urgencia)
+        demanda_s.append(str(r_relevancia) + ',' + str(distancia) + ',' + str(demanda.urgencia))
+        demanda_s.append(uf)
+
+        demandas_s.append(demanda_s)
+
+    demandas_s.sort(key=lambda x: x[10])
+
+    return demandas_s, quantidade
+
+
+def demandas_por_tipo_com_ultima_acao(tipo):
+    """
+    Lista as demandas de um tipo, com a descrição da última
+    providência ou despacho de cada uma (o que for mais recente).
+    """
+    demandas = db.session.query(Demanda.id, Demanda.programa, Demanda.sei, Demanda.convênio,
+                                Demanda.ano_convênio, Demanda.tipo, Demanda.data, Demanda.user_id,
+                                Demanda.titulo, Demanda.desc, Demanda.necessita_despacho,
+                                Demanda.conclu, Demanda.data_conclu, Demanda.necessita_despacho_cg,
+                                Demanda.urgencia, Demanda.data_env_despacho, Demanda.nota,
+                                Plano_Trabalho.atividade_sigla, Demanda.data_verific,
+                                User.username, User.coord)\
+                         .join(User, Demanda.user_id == User.id)\
+                         .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Demanda.programa)\
+                         .filter(Demanda.tipo == tipo)\
+                         .order_by(Demanda.id.desc())\
+                         .all()
+
+    l_act = {}
+
+    for demanda in demandas:
+
+        prov = db.session.query(Providencia.data, Providencia.texto, Providencia.passo)\
+                         .filter(Providencia.demanda_id == demanda.id)\
+                         .order_by(Providencia.data.desc()).first()
+
+        desp = db.session.query(Despacho.data, Despacho.texto, Despacho.passo)\
+                         .filter(Despacho.demanda_id == demanda.id)\
+                         .order_by(Despacho.data.desc()).first()
+
+        if prov is not None and desp is not None:
+            ultima = prov if prov.data > desp.data else desp
+            prefixo = 'P - ' if ultima is prov else 'D - '
+        elif prov is not None:
+            ultima = prov
+            prefixo = 'P - '
+        elif desp is not None:
+            ultima = desp
+            prefixo = 'D - '
+        else:
+            l_act[demanda.id] = 'sem registro'
+            continue
+
+        if ultima.passo is not None:
+            l_act[demanda.id] = prefixo + ultima.passo + ultima.texto
+        else:
+            l_act[demanda.id] = prefixo + ultima.texto
+
+    return demandas, len(demandas), l_act
+
+
+def pesquisa_choices():
+    """Retorna as 4 listas de opções (coord, tipo, autor, atividade) usadas no formulário de pesquisa."""
+    coords = db.session.query(Coords.sigla).order_by(Coords.sigla).all()
+    lista_coords = [(c[0], c[0]) for c in coords]
+    lista_coords.insert(0, ('', ''))
+
+    tipos = db.session.query(Tipos_Demanda.tipo).order_by(Tipos_Demanda.tipo).all()
+    lista_tipos = [(t[0], t[0]) for t in tipos]
+    lista_tipos.insert(0, ('', ''))
+
+    pessoas = db.session.query(User.username, User.id).order_by(User.username).all()
+    lista_pessoas = [(str(p[1]), p[0]) for p in pessoas]
+    lista_pessoas.insert(0, ('', ''))
+
+    atividades = db.session.query(Plano_Trabalho.atividade_sigla, Plano_Trabalho.id)\
+                           .order_by(Plano_Trabalho.atividade_sigla).all()
+    lista_atividades = [(str(a[1]), a[0]) for a in atividades]
+    lista_atividades.insert(0, ('', ''))
+
+    return lista_coords, lista_tipos, lista_pessoas, lista_atividades
+
+
+def montar_string_pesquisa(sei, titulo, tipo, necessita_despacho, conclu, convenio, autor,
+                            demanda_id, atividade, coord, necessita_despacho_cg):
+    """
+    Monta a string de pesquisa (campos separados por ';') usada para
+    passar os critérios de busca pela URL. A '/' do SEI é trocada por
+    '_' para não quebrar a URL.
+    """
+    sei_str = str(sei)
+    if sei_str.find('/') != -1:
+        sei_str = sei_str.split('/')[0] + '_' + sei_str.split('/')[1]
+
+    return ';'.join([
+        sei_str, str(titulo), str(tipo), str(necessita_despacho), str(conclu), str(convenio),
+        str(autor), str(demanda_id), str(atividade), str(coord), str(necessita_despacho_cg),
+    ])
+
+
+def executar_pesquisa(pesq, page):
+    """
+    Executa a busca de demandas a partir da string de critérios (pesq)
+    montada por `montar_string_pesquisa`. Retorna as demandas
+    (paginadas), a contagem total, e as providências/despachos
+    relacionados.
+    """
+    pesq_l = pesq.split(';')
+
+    sei = pesq_l[0]
+    if sei.find('_') != -1:
+        sei = str(pesq_l[0]).split('_')[0] + '/' + str(pesq_l[0]).split('_')[1]
+
+    p_tipo_pattern = '' if pesq_l[2] == 'Todos' else pesq_l[2]
+
+    p_n_d = 'Todos'
+    if pesq_l[3] == 'Sim':
+        p_n_d = '1'
+    if pesq_l[3] == 'Não':
+        p_n_d = '0'
+
+    p_n_dcg = 'Todos'
+    if pesq_l[10] == 'Sim':
+        p_n_dcg = '1'
+    if pesq_l[10] == 'Não':
+        p_n_dcg = '0'
+
+    p_conclu = '' if pesq_l[4] == 'Todos' else pesq_l[4]
+
+    conv = pesq_l[5] if pesq_l[5] != '' else '%'
+    autor_id = pesq_l[6] if pesq_l[6] != '' else '%'
+
+    pesq_l[7] = ('%' + str(pesq_l[7]) + '%') if pesq_l[7] == '' else str(pesq_l[7])
+    pesq_l[8] = ('%' + str(pesq_l[8]) + '%') if pesq_l[8] == '' else str(pesq_l[8])
+    pesq_l[9] = '%' if pesq_l[9] == '' else str(pesq_l[9])
+
+    demandas = db.session.query(Demanda.id, Demanda.programa, Demanda.sei, Demanda.convênio,
+                                Demanda.ano_convênio, Demanda.tipo, Demanda.data, Demanda.user_id,
+                                Demanda.titulo, Demanda.desc, Demanda.necessita_despacho,
+                                Demanda.conclu, Demanda.data_conclu, Demanda.necessita_despacho_cg,
+                                Demanda.urgencia, Demanda.data_env_despacho, Demanda.nota,
+                                Plano_Trabalho.atividade_sigla, User.coord, User.username)\
+                         .join(User, User.id == Demanda.user_id)\
+                         .outerjoin(Plano_Trabalho, Plano_Trabalho.id == Demanda.programa)\
+                         .filter(Demanda.sei.like('%' + sei + '%'),
+                                 func.coalesce(Demanda.convênio, '').like(conv),
+                                 Demanda.titulo.like('%' + pesq_l[1] + '%'),
+                                 Demanda.tipo.like('%' + p_tipo_pattern + '%'),
+                                 cast(Demanda.necessita_despacho, String) != p_n_d,
+                                 cast(Demanda.necessita_despacho_cg, String) != p_n_dcg,
+                                 cast(Demanda.conclu, String).like('%' + p_conclu + '%'),
+                                 cast(Demanda.user_id, String).like(autor_id),
+                                 cast(Demanda.id, String).like(pesq_l[7]),
+                                 cast(Demanda.programa, String).like(pesq_l[8]),
+                                 cast(User.coord, String).like(pesq_l[9]))\
+                         .order_by(Demanda.data.desc())\
+                         .paginate(page=page, per_page=8)
+
+    demandas_count = demandas.total
+
+    pro_des = providencias_e_despachos_todos()
+
+    return demandas, demandas_count, pro_des, pesq_l
