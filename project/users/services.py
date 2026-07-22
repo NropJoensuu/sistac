@@ -728,10 +728,27 @@ def coords_choices():
 
 
 def atualizar_usuario_admin(user_id, coord, despacha0, despacha, despacha2, ativo,
-                             role, cargo_func, trab_conv, trab_acordo, trab_instru, usuario_id):
-    """Atualiza os dados administrativos de um usuário (feito pelo admin)."""
+                             role, cargo_func, trab_conv, trab_acordo, trab_instru, admin_atual):
+    """
+    Atualiza os dados administrativos de um usuário (feito pelo admin).
+
+    O papel 'admin_master' só pode ser atribuído por quem já é
+    admin_master, e somente a usuários da coordenação COPES — essas
+    duas restrições são validadas aqui (defesa em profundidade; a
+    tela também não mostra essa opção para quem não é admin_master).
+    Retorna uma tupla (user, erro), onde erro é None em caso de sucesso.
+    """
     user = buscar_usuario(user_id)
     sistema = Sistema.query.first()
+
+    if role == 'admin_master' and user.role != 'admin_master':
+        if admin_atual.role != 'admin_master':
+            return user, 'Somente um admin master pode promover outro usuário a admin master.'
+        if coord != 'COPES':
+            return user, 'Admin master só pode ser atribuído a usuários da coordenação COPES.'
+
+    if user.role == 'admin_master' and role != 'admin_master' and admin_atual.role != 'admin_master':
+        return user, 'Somente um admin master pode remover o papel de admin master de outro usuário.'
 
     user.coord = coord
     user.despacha0 = 1 if despacha0 else 0
@@ -750,9 +767,9 @@ def atualizar_usuario_admin(user_id, coord, despacha0, despacha, despacha2, ativ
 
     db.session.commit()
 
-    registra_log_auto(usuario_id, None, 'adm')
+    registra_log_auto(admin_atual.id, None, 'adm')
 
-    return user
+    return user, None
 
 
 def listar_coords():

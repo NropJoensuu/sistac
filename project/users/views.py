@@ -477,9 +477,12 @@ def admin_update_user(user_id):
 
         form.coord.choices = services.coords_choices()
 
+        if current_user.role == 'admin_master' or user.role == 'admin_master':
+            form.role.choices = [('user','user'), ('admin','admin'), ('admin_master','admin master')]
+
         if form.validate_on_submit():
 
-            services.atualizar_usuario_admin(
+            usuario_atualizado, erro = services.atualizar_usuario_admin(
                 user_id=user_id,
                 coord=form.coord.data,
                 despacha0=form.despacha0.data,
@@ -491,8 +494,12 @@ def admin_update_user(user_id):
                 trab_conv=form.trab_conv.data,
                 trab_acordo=form.trab_acordo.data,
                 trab_instru=form.trab_instru.data,
-                usuario_id=current_user.id,
+                admin_atual=current_user,
             )
+
+            if erro:
+                flash(erro, 'erro')
+                return redirect(url_for('users.admin_update_user', user_id=user_id))
 
             flash('Usuário atualizado!','sucesso')
 

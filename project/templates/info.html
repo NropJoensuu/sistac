@@ -4,9 +4,13 @@
 <div class="container">
   <div class="jumbotron">
     <h3>Sobre este sistema</h3>
-    <p>Uma iniciativa que visa auxiliar o dia a dia no trabalho, trazendo as informações básicas dos Acordos e Convênios sob a
-      responsabilidade da Coordenação. O sitema oferece também uma forma de registrar e acompanhar as demandas tratadas por seus técnicos.
+    <p>{{ sistema.descritivo }}</p>
+    {% if current_user.is_authenticated and current_user.role == 'admin_master' %}
+    <p>
+      <a href="{{url_for('core.edita_sobre')}}" class="btn btn-sm btn-outline-secondary">Editar texto</a>
+      <a href="{{url_for('core.admin_config_sistema')}}" class="btn btn-sm btn-outline-secondary">Funcionalidades do sistema</a>
     </p>
+    {% endif %}
     {% if current_user.is_authenticated and current_user.trab_acordo == 1 %}
     <br>
     <h4>Acordos</h4>

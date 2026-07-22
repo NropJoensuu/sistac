@@ -102,6 +102,34 @@ def dados_sistema():
     return db.session.query(Sistema).first()
 
 
+def atualizar_descritivo_sistema(descritivo, admin_master_id):
+    """Atualiza o texto introdutório da página Sobre (exclusivo do admin master)."""
+    sistema = dados_sistema()
+    sistema.descritivo = descritivo
+    db.session.commit()
+
+    registra_log_auto(admin_master_id, None, 'sob')
+
+    return sistema
+
+
+def atualizar_config_funcionalidades(funcionalidade_conv, funcionalidade_acordo,
+                                      funcionalidade_instru, carga_auto, usuario_id):
+    """Liga/desliga as funcionalidades do sistema (exclusivo do admin master)."""
+    sistema = dados_sistema()
+
+    sistema.funcionalidade_conv = 1 if funcionalidade_conv else 0
+    sistema.funcionalidade_acordo = 1 if funcionalidade_acordo else 0
+    sistema.funcionalidade_instru = 1 if funcionalidade_instru else 0
+    sistema.carga_auto = 1 if carga_auto else 0
+
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'cfs')
+
+    return sistema
+
+
 def agendar_cargas_iniciais():
     """
     Agenda os jobs de carga automática (SICONV e DW) na inicialização
