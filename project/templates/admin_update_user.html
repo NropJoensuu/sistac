@@ -54,18 +54,26 @@
   </div>
 
   <div class="row">
+    {% if sistema.funcionalidade_conv == 1 %}
     <div class="form-group col-4">
       {{ render_field(form.trab_conv,class="form-control", obr=False) }}
     </div>
+    {% endif %}
+    {% if sistema.funcionalidade_acordo == 1 %}
     <div class="form-group col-4">
       {{ render_field(form.trab_acordo,class="form-control", obr=False) }}
     </div>
+    {% endif %}
+    {% if sistema.funcionalidade_instru == 1 %}
     <div class="form-group col-4">
       {{ render_field(form.trab_instru,class="form-control", obr=False) }}
     </div>
+    {% endif %}
+    {% if sistema.funcionalidade_conv == 1 or sistema.funcionalidade_acordo == 1 or sistema.funcionalidade_instru == 1 %}
     <div class="col-8">
       <p align="center">OBS: Estas opções dependem do uso das respectivas funcionalidades pelo sistema.</p>
     </div>
+    {% endif %}
   </div>
 
   <div class="form-group">

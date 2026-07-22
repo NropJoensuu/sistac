@@ -92,7 +92,7 @@ from project.models import (
     Processo_Filho, Processo_Mae, MSG_Siconv, Chamadas, Homologados,
     Coords, Programa_CNPq, chamadas_cnpq, chamadas_cnpq_acordos,
     Acordo_ProcMae, Programa, Proposta, Convenio, Empenho, Desembolso,
-    Pagamento, Crono_Desemb, Plano_Aplic, RefSICONV,
+    Pagamento, Crono_Desemb, Plano_Aplic, RefSICONV, User,
 )
 from project.demandas.views import registra_log_auto
 
@@ -115,13 +115,31 @@ def atualizar_descritivo_sistema(descritivo, admin_master_id):
 
 def atualizar_config_funcionalidades(funcionalidade_conv, funcionalidade_acordo,
                                       funcionalidade_instru, carga_auto, usuario_id):
-    """Liga/desliga as funcionalidades do sistema (exclusivo do admin master)."""
+    """
+    Liga/desliga as funcionalidades do sistema (exclusivo do admin
+    master). Ao desabilitar uma funcionalidade, remove em cascata a
+    permissão correspondente ("trabalha com X") de todos os usuários
+    que a tinham — decisão de negócio confirmada explicitamente (antes,
+    desabilitar só bloqueava novas atribuições, sem afetar quem já
+    tinha a permissão).
+    """
     sistema = dados_sistema()
+
+    desabilitou_conv = sistema.funcionalidade_conv == 1 and not funcionalidade_conv
+    desabilitou_acordo = sistema.funcionalidade_acordo == 1 and not funcionalidade_acordo
+    desabilitou_instru = sistema.funcionalidade_instru == 1 and not funcionalidade_instru
 
     sistema.funcionalidade_conv = 1 if funcionalidade_conv else 0
     sistema.funcionalidade_acordo = 1 if funcionalidade_acordo else 0
     sistema.funcionalidade_instru = 1 if funcionalidade_instru else 0
     sistema.carga_auto = 1 if carga_auto else 0
+
+    if desabilitou_conv:
+        db.session.query(User).filter(User.trab_conv == 1).update({User.trab_conv: 0}, synchronize_session='fetch')
+    if desabilitou_acordo:
+        db.session.query(User).filter(User.trab_acordo == 1).update({User.trab_acordo: 0}, synchronize_session='fetch')
+    if desabilitou_instru:
+        db.session.query(User).filter(User.trab_instru == 1).update({User.trab_instru: 0}, synchronize_session='fetch')
 
     db.session.commit()
 

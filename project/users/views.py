@@ -520,7 +520,7 @@ def admin_update_user(user_id):
             form.trab_instru.data = user.trab_instru
 
         return render_template('admin_update_user.html', title='Update', name=user.username,
-                               form=form)
+                               form=form, sistema=services.dados_sistema())
 
 
 

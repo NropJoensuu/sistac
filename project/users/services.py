@@ -670,6 +670,11 @@ def buscar_usuario(user_id):
     return User.query.get_or_404(user_id)
 
 
+def dados_sistema():
+    """Retorna o registro único de configuração geral do sistema."""
+    return Sistema.query.first()
+
+
 def confirmar_email_manualmente(user_id, admin_id):
     """
     Permite que um admin confirme manualmente o e-mail de um usuário

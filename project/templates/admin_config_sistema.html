@@ -4,7 +4,7 @@
 
 <div class="jumbotron">
 <h2>Funcionalidades do sistema</h2>
-<p class="text-muted">Exclusivo do admin master. Desabilitar uma funcionalidade impede que novos usuários recebam a permissão correspondente (não remove permissões já concedidas).</p>
+<p class="text-muted">Exclusivo do admin master. Desabilitar uma funcionalidade remove a permissão correspondente de todos os usuários que a tinham, e o campo deixa de aparecer na tela de edição de usuário.</p>
 
 {% macro render_field(field,obr) %}
   {% if obr == True %}
