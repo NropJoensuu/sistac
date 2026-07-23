@@ -26,7 +26,11 @@ from sqlalchemy import func
 from sqlalchemy.sql import label
 
 from project import db, mail, app, sched
-from project.models import User, Coords, Sistema, Demanda, Providencia, Despacho, Log_Auto, Plano_Trabalho, Ativ_Usu, RefSICONV, Log_Desc, Msgs_Recebidas
+from project.models import (
+    User, Coords, Sistema, Demanda, Providencia, Despacho, Log_Auto,
+    Plano_Trabalho, Ativ_Usu, RefSICONV, Log_Desc, Msgs_Recebidas,
+    Programa_CNPq, Acordo, Programa_Interesse, Tipos_Demanda, Instrumento,
+)
 from project.demandas.views import registra_log_auto
 from project.core.services import cargaSICONV, chamadas_DW
 
@@ -807,6 +811,63 @@ def atualizar_coord(coord_id, sigla, pai):
     coord.pai = pai
     db.session.commit()
     return coord
+
+
+def coords_choices_para_transferencia():
+    """Retorna a lista de coordenações formatada para os SelectFields de origem/destino."""
+    coords = listar_coords()
+    lista = [(c.sigla, c.sigla) for c in coords]
+    lista.insert(0, ('', ''))
+    return lista
+
+
+def transferir_unidade(sigla_origem, sigla_destino, admin_master_id):
+    """
+    Move todas as referências de uma coordenação (origem) para outra
+    (destino) — usuários, programas CNPq, acordos, programas de
+    interesse, tipos de demanda, plano de trabalho, instrumentos, e as
+    coordenações-filhas (que passam a ter a nova coordenação como
+    pai). Ao final, exclui o registro da coordenação de origem, que
+    fica sem nenhuma referência.
+
+    Alternativa deliberada à exclusão direta de uma coordenação, que
+    poderia deixar registros órfãos (sigla salva como texto solto em
+    várias tabelas, não como chave estrangeira).
+    """
+    if sigla_origem == sigla_destino:
+        return None, 'A unidade de origem e destino não podem ser a mesma.'
+
+    origem = db.session.query(Coords).filter(Coords.sigla == sigla_origem).first()
+    if origem is None:
+        return None, 'Unidade de origem não encontrada.'
+
+    destino_existe = db.session.query(Coords).filter(Coords.sigla == sigla_destino).first()
+    if destino_existe is None:
+        return None, 'Unidade de destino não encontrada.'
+
+    db.session.query(User).filter(User.coord == sigla_origem)\
+             .update({User.coord: sigla_destino}, synchronize_session='fetch')
+    db.session.query(Programa_CNPq).filter(Programa_CNPq.COORD == sigla_origem)\
+             .update({Programa_CNPq.COORD: sigla_destino}, synchronize_session='fetch')
+    db.session.query(Acordo).filter(Acordo.unidade_cnpq == sigla_origem)\
+             .update({Acordo.unidade_cnpq: sigla_destino}, synchronize_session='fetch')
+    db.session.query(Programa_Interesse).filter(Programa_Interesse.coord == sigla_origem)\
+             .update({Programa_Interesse.coord: sigla_destino}, synchronize_session='fetch')
+    db.session.query(Tipos_Demanda).filter(Tipos_Demanda.unidade == sigla_origem)\
+             .update({Tipos_Demanda.unidade: sigla_destino}, synchronize_session='fetch')
+    db.session.query(Plano_Trabalho).filter(Plano_Trabalho.unidade == sigla_origem)\
+             .update({Plano_Trabalho.unidade: sigla_destino}, synchronize_session='fetch')
+    db.session.query(Instrumento).filter(Instrumento.coord == sigla_origem)\
+             .update({Instrumento.coord: sigla_destino}, synchronize_session='fetch')
+    db.session.query(Coords).filter(Coords.pai == sigla_origem)\
+             .update({Coords.pai: sigla_destino}, synchronize_session='fetch')
+
+    db.session.delete(origem)
+    db.session.commit()
+
+    registra_log_auto(admin_master_id, None, 'trc')
+
+    return sigla_destino, None
 
 
 def listar_tipos_log():

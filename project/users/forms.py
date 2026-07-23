@@ -128,6 +128,14 @@ class CoordForm(FlaskForm):
 
     submit = SubmitField('Registrar') 
 
+
+class TransferUnidadeForm(FlaskForm):
+
+    origem  = SelectField('Unidade de origem (será removida):', validators=[DataRequired(message="Escolha a unidade de origem!")])
+    destino = SelectField('Unidade de destino (recebe tudo da origem):', validators=[DataRequired(message="Escolha a unidade de destino!")])
+
+    submit  = SubmitField('Transferir')
+
 class LogForm(FlaskForm):
 
     data_ini = DateField('Data Inicial: ', format='%Y-%m-%d')

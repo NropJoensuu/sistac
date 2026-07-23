@@ -8,11 +8,13 @@
       <h3>Lista das unidades</h3>
     </div>
 
-    {% if current_user.is_authenticated %}
+    {% if current_user.is_authenticated and current_user.role == 'admin_master' %}
     <div class="row">
       <div class="col">
         <a href="{{url_for('users.admin_insere_coord')}}" class="btn btn-primary" role="button" aria-pressed="false">
           <abbr title="Inserir um novo registro na lista abaixo.">Inserir nova</a>
+        <a href="{{url_for('users.admin_transfere_unidade')}}" class="btn btn-outline-danger" role="button" aria-pressed="false">
+          <abbr title="Move tudo de uma unidade para outra e exclui a de origem.">Transferir unidade</a>
       </div>
     </div>
     {% endif %}
@@ -30,7 +32,11 @@
         <tbody>
           {% for c in coords %}
             <tr>
+              {% if current_user.is_authenticated and current_user.role == 'admin_master' %}
               <td> <a href="{{url_for('users.admin_update_coord', id=c.id)}}"><abbr title="Clique aqui atualizar">{{coords.index(c) + 1}} </td>
+              {% else %}
+              <td> {{coords.index(c) + 1}} </td>
+              {% endif %}
               <td> {{ c.sigla }} </td>
               <td> {{ c.pai }} </td>
             </tr>

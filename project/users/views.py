@@ -53,7 +53,8 @@ from wtforms import ValidationError
 from datetime import date
 
 from project.users.forms import RegistrationForm, LoginForm, UpdateUserForm, EmailForm, PasswordForm, AdminForm,\
-                                LogForm, LogFormMan, VerForm, RelForm, AtivUsu, TrocaPasswordForm, CoordForm, TipoLogForm
+                                LogForm, LogFormMan, VerForm, RelForm, AtivUsu, TrocaPasswordForm, CoordForm, TipoLogForm,\
+                                TransferUnidadeForm
 from project.users import services
 from project.users import services
 
@@ -557,7 +558,7 @@ def admin_insere_coord():
     +----------------------------------------------------------------------------------------------+
     """
 
-    if current_user.role[0:5] != 'admin':
+    if current_user.role != 'admin_master':
 
         abort(403)
 
@@ -588,7 +589,7 @@ def admin_update_coord(id):
     |                                                                                              |
     +----------------------------------------------------------------------------------------------+
     """
-    if current_user.role[0:5] != 'admin':
+    if current_user.role != 'admin_master':
 
         abort(403)
 
@@ -612,6 +613,40 @@ def admin_update_coord(id):
             form.pai.data    = coord.pai 
 
         return render_template('admin_update_coord.html', form=form)
+
+
+## transfere tudo de uma unidade para outra (alternativa à exclusão)
+
+@users.route("/admin_transfere_unidade", methods=['GET', 'POST'])
+@login_required
+def admin_transfere_unidade():
+    """
+    +----------------------------------------------------------------------------------------------+
+    |Permite ao admin master mover tudo de uma unidade (usuários, programas, acordos, tipos de      |
+    |demanda, plano de trabalho, instrumentos e unidades-filhas) para outra unidade, e em seguida   |
+    |exclui a unidade de origem (que fica sem nenhuma referência).                                 |
+    +----------------------------------------------------------------------------------------------+
+    """
+    if current_user.role != 'admin_master':
+        abort(403)
+
+    form = TransferUnidadeForm()
+    form.origem.choices = services.coords_choices_para_transferencia()
+    form.destino.choices = services.coords_choices_para_transferencia()
+
+    if form.validate_on_submit():
+
+        resultado, erro = services.transferir_unidade(form.origem.data, form.destino.data, current_user.id)
+
+        if erro:
+            flash(erro, 'erro')
+            return redirect(url_for('users.admin_transfere_unidade'))
+
+        flash('Unidade ' + form.origem.data + ' transferida para ' + form.destino.data + '!', 'sucesso')
+
+        return redirect(url_for('users.admin_view_coords'))
+
+    return render_template('admin_transfere_unidade.html', form=form)
 
 
 
