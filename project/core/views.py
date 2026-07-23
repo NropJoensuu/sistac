@@ -30,7 +30,6 @@ from flask_login import login_required, current_user
 from project.demandas.views import registra_log_auto
 from project.convenios.forms import ChamadaForm, SEIForm
 from project.acordos.forms import ArquivoForm, HomologadoForm
-from project.core.forms import EditaSobreForm, ConfigSistemaForm
 
 core = Blueprint("core",__name__)
 
@@ -72,73 +71,6 @@ def info():
 
     return render_template('info.html', sistema=sistema)
 
-
-@core.route('/edita_sobre', methods=['GET', 'POST'])
-@login_required
-def edita_sobre():
-    """
-    +---------------------------------------------------------------------------------------+
-    |Permite que o admin master edite o texto introdutório da página Sobre.                |
-    +---------------------------------------------------------------------------------------+
-    """
-    if current_user.role != 'admin_master':
-        abort(403)
-
-    sistema = services.dados_sistema()
-
-    form = EditaSobreForm()
-
-    if form.validate_on_submit():
-
-        services.atualizar_descritivo_sistema(form.descritivo.data, current_user.id)
-
-        flash('Texto da página Sobre atualizado!', 'sucesso')
-
-        return redirect(url_for('core.info'))
-
-    elif request.method == 'GET':
-        form.descritivo.data = sistema.descritivo
-
-    return render_template('edita_sobre.html', form=form)
-
-
-@core.route('/admin_config_sistema', methods=['GET', 'POST'])
-@login_required
-def admin_config_sistema():
-    """
-    +---------------------------------------------------------------------------------------+
-    |Permite que o admin master ligue/desligue as funcionalidades do sistema (Convênios,    |
-    |Acordos, Instrumentos) e a carga automática.                                           |
-    +---------------------------------------------------------------------------------------+
-    """
-    if current_user.role != 'admin_master':
-        abort(403)
-
-    sistema = services.dados_sistema()
-
-    form = ConfigSistemaForm()
-
-    if form.validate_on_submit():
-
-        services.atualizar_config_funcionalidades(
-            funcionalidade_conv=form.funcionalidade_conv.data,
-            funcionalidade_acordo=form.funcionalidade_acordo.data,
-            funcionalidade_instru=form.funcionalidade_instru.data,
-            carga_auto=form.carga_auto.data,
-            usuario_id=current_user.id,
-        )
-
-        flash('Funcionalidades do sistema atualizadas!', 'sucesso')
-
-        return redirect(url_for('core.admin_config_sistema'))
-
-    elif request.method == 'GET':
-        form.funcionalidade_conv.data = sistema.funcionalidade_conv
-        form.funcionalidade_acordo.data = sistema.funcionalidade_acordo
-        form.funcionalidade_instru.data = sistema.funcionalidade_instru
-        form.carga_auto.data = sistema.carga_auto
-
-    return render_template('admin_config_sistema.html', form=form)
 
 @core.route('/carregaPDCTR', methods=['GET', 'POST'])
 @login_required

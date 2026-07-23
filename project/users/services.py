@@ -746,14 +746,19 @@ def atualizar_usuario_admin(user_id, coord, despacha0, despacha, despacha2, ativ
     user = buscar_usuario(user_id)
     sistema = Sistema.query.first()
 
-    if role == 'admin_master' and user.role != 'admin_master':
-        if admin_atual.role != 'admin_master':
-            return user, 'Somente um admin master pode promover outro usuário a admin master.'
-        if coord != 'COPES':
-            return user, 'Admin master só pode ser atribuído a usuários da coordenação COPES.'
+    # Qualquer mudança de papel que conceda ou remova privilégio de admin
+    # (para 'admin' ou 'admin_master', em qualquer direção) só pode ser
+    # feita por um admin master. Atribuir 'admin_master' especificamente
+    # também exige que o usuário seja da coordenação COPES.
+    papeis_privilegiados = ('admin', 'admin_master')
+    mudou_papel = role != user.role
+    envolve_privilegio = role in papeis_privilegiados or user.role in papeis_privilegiados
 
-    if user.role == 'admin_master' and role != 'admin_master' and admin_atual.role != 'admin_master':
-        return user, 'Somente um admin master pode remover o papel de admin master de outro usuário.'
+    if mudou_papel and envolve_privilegio:
+        if admin_atual.role != 'admin_master':
+            return user, 'Somente um admin master pode conceder ou remover papel de admin.'
+        if role == 'admin_master' and coord != 'COPES':
+            return user, 'Admin master só pode ser atribuído a usuários da coordenação COPES.'
 
     user.coord = coord
     user.despacha0 = 1 if despacha0 else 0

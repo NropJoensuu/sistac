@@ -317,11 +317,11 @@ def user_pt (user_id):
 
 def admin_reg_ver():
     """+--------------------------------------------------------------------------------------+
-       |O admin atualiza no banco de dados (tabela Users) a versão do sistema após uma        |
+       |O admin master atualiza no banco de dados a versão do sistema após uma               |
        |atualização e outros parâmetros do sistema.                                           |
        +--------------------------------------------------------------------------------------+
     """
-    if current_user.role[0:5] != 'admin':
+    if current_user.role != 'admin_master':
         abort(403)
     else:
         users, sistema, inst = services.dados_config_sistema()
@@ -477,8 +477,12 @@ def admin_update_user(user_id):
 
         form.coord.choices = services.coords_choices()
 
-        if current_user.role == 'admin_master' or user.role == 'admin_master':
+        if current_user.role == 'admin_master':
             form.role.choices = [('user','user'), ('admin','admin'), ('admin_master','admin master')]
+        else:
+            # admin comum não concede nem remove papel de admin — o campo
+            # fica travado no papel atual do usuário
+            form.role.choices = [(user.role, user.role)]
 
         if form.validate_on_submit():
 

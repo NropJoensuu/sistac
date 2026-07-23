@@ -126,7 +126,9 @@
                 <a class="dropdown-item" href="{{url_for('users.user_log',usu='*')}}">Ver diário</a>
                 {% if current_user.role[0:5] == "admin" %}
                   <a class="dropdown-item"  href="{{ url_for('users.admin_view_users') }}">Ver Usuários (Admin)</a>
-                  <a class="dropdown-item"  href="{{ url_for('users.admin_reg_ver') }}">Dados gerais do sistema (Admin)</a>
+                  {% if current_user.role == 'admin_master' %}
+                  <a class="dropdown-item"  href="{{ url_for('users.admin_reg_ver') }}">Dados gerais do sistema (Admin Master)</a>
+                  {% endif %}
                   <a class="dropdown-item"  href="{{ url_for('users.admin_view_coords') }}">Unidades (Admin)</a>
                 {% endif %}
                 {% if current_user.despacha == 1 or current_user.despacha0 == 1 %}

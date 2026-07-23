@@ -1,10 +1,11 @@
 # test_users_admin_master.py
 #
-# Testes da nova funcionalidade Admin Master: um papel acima do admin
-# comum, que só pode ser atribuído por outro admin master, e somente
-# a usuários da coordenação COPES. Admin master ganha acesso a duas
-# telas exclusivas: editar o texto da página Sobre, e ligar/desligar
-# as funcionalidades do sistema (Convênios/Acordos/Instrumentos).
+# Testes da funcionalidade Admin Master: um papel acima do admin
+# comum, que só pode ser atribuído (ou removido) por outro admin
+# master, e somente a usuários da coordenação COPES. Admin master tem
+# acesso exclusivo à tela "Dados gerais do sistema" (admin_reg_ver),
+# que reúne configuração de versão, texto da página Sobre, e as
+# funcionalidades do sistema (Convênios/Acordos/Instrumentos).
 
 from project import db
 from project.models import User
@@ -89,35 +90,55 @@ def test_admin_master_nao_pode_promover_usuario_fora_de_copes(app):
         assert User.query.get(alvo_id).role == 'admin'
 
 
-def test_edita_sobre_bloqueado_para_admin_comum(client, app):
-    user_id = _usuario(app, 'teste.editasobreadmincomum@teste.com', 'usuarioeditasobreadmincomumteste', role='admin')
+def test_admin_reg_ver_bloqueado_para_admin_comum(client, app):
+    """
+    Regressão da consolidação: admin_reg_ver ('Dados gerais do
+    sistema') passou a ser exclusivo do admin master — antes era
+    aberto a qualquer admin.
+    """
+    user_id = _usuario(app, 'teste.regveradmincomum@teste.com', 'usuarioregveradmincomumteste', role='admin')
     _login(client, user_id)
-    resp = client.get("/edita_sobre")
+    resp = client.get("/admin_reg_ver")
     assert resp.status_code == 403
 
 
-def test_edita_sobre_permitido_para_admin_master(client, app):
-    user_id = _usuario(app, 'teste.editasobremaster@teste.com', 'usuarioeditasobremasterteste', role='admin_master')
+def test_admin_reg_ver_permitido_para_admin_master(client, app):
+    user_id = _usuario(app, 'teste.regvermaster@teste.com', 'usuarioregvermasterteste', role='admin_master')
     _login(client, user_id)
-    resp = client.get("/edita_sobre")
+    resp = client.get("/admin_reg_ver")
     assert resp.status_code == 200
 
 
-def test_admin_config_sistema_bloqueado_para_admin_comum(client, app):
-    user_id = _usuario(app, 'teste.configsistemaadmincomum@teste.com', 'usuarioconfigsistemaadmincomumteste', role='admin')
-    _login(client, user_id)
-    resp = client.get("/admin_config_sistema")
-    assert resp.status_code == 403
+def test_admin_comum_nao_promove_ninguem_a_admin(app):
+    """Regressão: conceder papel 'admin' também passou a ser exclusivo do admin master."""
+    with app.app_context():
+        admin_comum_id = _usuario(app, 'teste.admincomum2@teste.com', 'usuarioadmincomum2teste', role='admin')
+        alvo_id = _usuario(app, 'teste.alvopromocaoadmin@teste.com', 'usuarioalvopromocaoadminteste', role='user')
+
+        admin_comum = User.query.get(admin_comum_id)
+
+        user, erro = services.atualizar_usuario_admin(
+            user_id=alvo_id, coord='DPI', despacha0=0, despacha=0, despacha2=0, ativo=1,
+            role='admin', cargo_func='teste', trab_conv=1, trab_acordo=1, trab_instru=1,
+            admin_atual=admin_comum,
+        )
+
+        assert erro is not None
+        assert User.query.get(alvo_id).role == 'user'
 
 
-def test_admin_config_sistema_permitido_para_admin_master(client, app):
-    user_id = _usuario(app, 'teste.configsistemamaster@teste.com', 'usuarioconfigsistemamasterteste', role='admin_master')
-    _login(client, user_id)
-    resp = client.get("/admin_config_sistema")
-    assert resp.status_code == 200
+def test_admin_master_promove_usuario_a_admin(app):
+    with app.app_context():
+        master_id = _usuario(app, 'teste.masterpromoveadmin@teste.com', 'usuariomasterpromoveadminteste', coord='COPES', role='admin_master')
+        alvo_id = _usuario(app, 'teste.alvopromovido@teste.com', 'usuarioalvopromovidoteste', coord='DPI', role='user')
 
+        master = User.query.get(master_id)
 
-def test_pagina_sobre_nao_mostra_botoes_para_visitante(client):
-    resp = client.get("/info")
-    assert resp.status_code == 200
-    assert b'Funcionalidades do sistema' not in resp.data
+        user, erro = services.atualizar_usuario_admin(
+            user_id=alvo_id, coord='DPI', despacha0=0, despacha=0, despacha2=0, ativo=1,
+            role='admin', cargo_func='teste', trab_conv=1, trab_acordo=1, trab_instru=1,
+            admin_atual=master,
+        )
+
+        assert erro is None
+        assert User.query.get(alvo_id).role == 'admin'

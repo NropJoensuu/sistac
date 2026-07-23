@@ -5,12 +5,6 @@
   <div class="jumbotron">
     <h3>Sobre este sistema</h3>
     <p>{{ sistema.descritivo }}</p>
-    {% if current_user.is_authenticated and current_user.role == 'admin_master' %}
-    <p>
-      <a href="{{url_for('core.edita_sobre')}}" class="btn btn-sm btn-outline-secondary">Editar texto</a>
-      <a href="{{url_for('core.admin_config_sistema')}}" class="btn btn-sm btn-outline-secondary">Funcionalidades do sistema</a>
-    </p>
-    {% endif %}
     {% if current_user.is_authenticated and current_user.trab_acordo == 1 %}
     <br>
     <h4>Acordos</h4>
