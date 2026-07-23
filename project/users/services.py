@@ -736,6 +736,44 @@ def coords_choices():
     return lista_coords
 
 
+def _unidades_hierarquia(unidade):
+    """Retorna a lista de coordenações a considerar (a própria unidade + filhas, se houver)."""
+    hierarquia = db.session.query(Coords.sigla).filter(Coords.pai == unidade).all()
+
+    if hierarquia:
+        l_unid = [f.sigla for f in hierarquia]
+        l_unid.append(unidade)
+        return l_unid
+
+    return [unidade]
+
+
+def listar_usuarios_visiveis(admin):
+    """
+    Lista os usuários visíveis para um admin: todos os usuários, se
+    for admin master; apenas os da própria coordenação (e suas
+    unidades-filhas), se for admin comum.
+    """
+    if admin.role == 'admin_master':
+        return listar_usuarios()
+
+    l_unid = _unidades_hierarquia(admin.coord)
+    return User.query.filter(User.coord.in_(l_unid)).order_by(User.id).all()
+
+
+def usuario_visivel_para(admin, user):
+    """
+    Verifica se um admin tem permissão para ver/editar um usuário: o
+    admin master vê/edita qualquer um; o admin comum, só usuários da
+    própria coordenação (e suas unidades-filhas).
+    """
+    if admin.role == 'admin_master':
+        return True
+
+    l_unid = _unidades_hierarquia(admin.coord)
+    return user.coord in l_unid
+
+
 def atualizar_usuario_admin(user_id, coord, despacha0, despacha, despacha2, ativo,
                              role, cargo_func, trab_conv, trab_acordo, trab_instru, admin_atual):
     """

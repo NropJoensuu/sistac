@@ -374,7 +374,7 @@ def admin_view_users():
     if current_user.role[0:5] != 'admin':
         abort(403)
     else:
-        users = services.listar_usuarios()
+        users = services.listar_usuarios_visiveis(current_user)
         return render_template('admin_view_users.html', users=users)
 
 #
@@ -471,6 +471,9 @@ def admin_update_user(user_id):
     else:
 
         user = services.buscar_usuario(user_id)
+
+        if not services.usuario_visivel_para(current_user, user):
+            abort(403)
 
         form = AdminForm()
 
