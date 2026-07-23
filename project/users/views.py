@@ -280,6 +280,27 @@ def account():
 
     return render_template('account.html', form=form, **stats)
 
+
+@users.route('/cancela_conta', methods=['POST'])
+@login_required
+def cancela_conta():
+    """+--------------------------------------------------------------------------------------+
+       |Permite que o próprio usuário cancele sua conta. Desativa o cadastro e anonimiza      |
+       |e-mail/nome, liberando o e-mail para um novo cadastro no futuro. O histórico          |
+       |(demandas, providências, despachos, log) permanece intacto.                           |
+       |                                                                                      |
+       |A confirmação é feita via pop-up (JS) na própria tela, antes do envio do formulário.  |
+       +--------------------------------------------------------------------------------------+
+    """
+    services.cancelar_propria_conta(current_user)
+
+    logout_user()
+
+    flash('Sua conta foi cancelada.', 'sucesso')
+
+    return redirect(url_for('core.inicio'))
+
+
 # lista das demandas de um usuário
 
 @users.route('/user_posts/<filtro>/<username>')

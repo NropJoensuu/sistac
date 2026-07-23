@@ -51,6 +51,11 @@
 <p></p>
           <h4>Atenção! Caso queira alterar sua senha, faça isto no momento da entrada no sistema.</h4>
 
+          <form method="POST" action="{{ url_for('users.cancela_conta') }}"
+                onsubmit="return confirm('Tem certeza que deseja cancelar sua conta? Seu e-mail e nome de usuário serão removidos, mas seu histórico permanece registrado. Essa ação não pode ser desfeita.');">
+            <button type="submit" class="btn btn-outline-danger">Cancelar minha conta</button>
+          </form>
+
         </div>
 
         <div class="card-footer text-center">

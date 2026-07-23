@@ -270,6 +270,34 @@ def atualizar_perfil(usuario, username, email):
     registra_log_auto(usuario.id, None, 'usu')
 
 
+def cancelar_propria_conta(usuario):
+    """
+    Cancela a conta do próprio usuário: desativa (ativo=0) e anonimiza
+    e-mail/nome de usuário, liberando o e-mail original para um novo
+    cadastro no futuro (username e email são campos únicos, não podem
+    ficar vazios). O histórico (demandas, providências, despachos, log)
+    permanece intacto, ainda vinculado ao mesmo ID. Envia um e-mail de
+    aviso ao endereço atual (sem link de confirmação — o cancelamento
+    já acontece de imediato, a confirmação foi feita via pop-up na tela).
+    """
+    email_atual = usuario.email
+    nome_atual = usuario.username
+
+    usuario.ativo = 0
+    usuario.email = 'cancelado_' + str(usuario.id) + '@sistac.local'
+    usuario.username = 'cancelado_' + str(usuario.id)
+
+    db.session.commit()
+
+    registra_log_auto(usuario.id, None, 'can')
+
+    sistema = Sistema.query.first()
+
+    html = render_template('email_conta_cancelada.html', user=nome_atual, sistema=sistema.nome_sistema)
+
+    send_email('Sua conta foi cancelada', [email_atual], '', html)
+
+
 def calcular_estatisticas_conta(user_id, hoje):
     """
     Calcula as estatísticas exibidas na tela de conta do usuário:

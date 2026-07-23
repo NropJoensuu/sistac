@@ -8,29 +8,26 @@ qual decisão de produto precisa ser tomada antes de implementar.
 
 ## 1. Usuários (prioridade atual)
 
-### 1.1 Painel de "Funcionalidades do sistema" — **novo**
-Hoje as flags `funcionalidade_conv` / `funcionalidade_acordo` / `funcionalidade_instru`
-(que acabamos de habilitar manualmente no banco) só são alteráveis direto no banco de
-dados — não existe nenhuma tela no sistema para isso. Elas controlam se as permissões
-"trabalha com convênios/acordos/instrumentos" podem ser atribuídas a um usuário.
+### 1.1 Painel de "Funcionalidades do sistema" — **concluído**
+Virou o papel Admin Master: novo `role='admin_master'`, tela "Dados gerais do
+sistema" exclusiva pra ele, com cascata de desativação de permissões e restrição de
+hierarquia por coordenação para admin comum. Já implementado, testado e publicado.
 
-**Decisão pendente:** quem deveria poder alterar isso?
-- Opção A: um novo papel "super admin", acima do `admin` atual
-- Opção B: o próprio `admin` atual, numa tela nova (ex: `/admin_config_sistema`)
+### 1.2 Autogestão de conta pelo próprio usuário — **concluído**
+- Alterar o próprio e-mail: já existia (`account()`), sem mudança.
+- Autoexcluir a própria conta: implementado. Desativa (`ativo=0`) e anonimiza
+  e-mail/nome de usuário (liberando o e-mail original para um novo cadastro no
+  futuro), preservando o histórico (demandas, log) intacto, ainda vinculado ao
+  mesmo ID. Confirmação via pop-up (JS) na tela "Suas informações"; e-mail de
+  aviso enviado ao endereço atual, sem link de confirmação (ação já é imediata).
 
-Sugestão minha: começar pela Opção B (mais simples, sem criar hierarquia de papéis
-nova) e só evoluir para super-admin se, na prática, times diferentes precisarem de
-níveis diferentes de acesso.
-
-### 1.2 Autogestão de conta pelo próprio usuário — **novo**
-Anotação sua de uma sessão anterior: usuário deveria conseguir, sem depender do admin:
-- Alterar o próprio e-mail cadastrado
-- Autoexcluir a própria conta/dados
-
-Hoje isso só é possível via admin (e a exclusão via admin, que já implementamos, é
-restrita a cadastros não confirmados — por segurança). Precisamos decidir: um usuário
-ativo e confirmado pode se autoexcluir livremente, ou deveria haver alguma restrição
-(ex: não pode se autoexcluir se tiver demandas em aberto)?
+### 1.5 Tela de configuração de textos de e-mail (Admin Master) — **novo, futuro**
+Hoje cada e-mail que o sistema envia (confirmação de cadastro, redefinir senha,
+demanda concluída, pede despacho, despacho emitido, providência alheia,
+transferência de demanda, conta cancelada...) é um arquivo HTML fixo no código.
+Pra ficar editável pelo admin master, seria necessário mover o texto de cada um
+pro banco de dados, e adaptar cada ponto do sistema que hoje monta o e-mail
+direto do arquivo pra buscar do banco. Frente própria, ainda não iniciada.
 
 ### 1.3 Gestão de cadastros pendentes pelo admin — **concluído nesta sessão**
 Confirmar e-mail manualmente, reenviar confirmação, excluir cadastro não confirmado.
