@@ -160,7 +160,6 @@ class LogFormMan(FlaskForm):
 
 class VerForm(FlaskForm):
 
-    ver                   = StringField('Versão: ')
     cod_inst              = StringField('Cód. da Instituição: ')
     nome_sistema          = StringField('Nome do sistema: ')
     descritivo            = TextAreaField('Descritivo: ')

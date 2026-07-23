@@ -569,26 +569,26 @@ def listar_usuarios():
 
 def dados_config_sistema():
     """Retorna os dados atuais de configuração geral do sistema."""
-    users = listar_usuarios()
     sistema = Sistema.query.first()
     inst = RefSICONV.query.first()
-    return users, sistema, inst
+    return sistema, inst
 
 
-def atualizar_config_sistema(ver, nome_sistema, descritivo, funcionalidade_conv,
+def atualizar_config_sistema(nome_sistema, descritivo, funcionalidade_conv,
                               funcionalidade_acordo, funcionalidade_instru,
                               cod_inst, carga_auto, usuario_id):
     """
-    Atualiza a versão do sistema para todos os usuários, os dados gerais
-    do Sistema, o código da instituição no SICONV, e agenda/cancela as
-    cargas automáticas (SICONV e DW) conforme o parâmetro carga_auto.
+    Atualiza os dados gerais do Sistema, o código da instituição no
+    SICONV, e agenda/cancela as cargas automáticas (SICONV e DW)
+    conforme o parâmetro carga_auto. Ao desabilitar uma funcionalidade,
+    remove a permissão correspondente ("trabalha com X") de todos os
+    usuários que a tinham.
     """
     users = listar_usuarios()
     sistema = Sistema.query.first()
     inst = RefSICONV.query.first()
 
     for user in users:
-        user.sversion = ver
         if not funcionalidade_conv:
             user.trab_conv = 0
         if not funcionalidade_acordo:

@@ -192,16 +192,9 @@
             </div>
           </li>
 
-          {% set ver = namespace(num='5.0.13') %}
-
-          {% if current_user.is_authenticated and current_user.sversion != ver.num %}
-            <li class="nav-item">
-              <span class="navbar-text text-danger">ATENÇÃO! VOCÊ NÃO ESTÁ EXECUTANDO A VERSÃO CORRETA DO SISTEMA!</span>
-            </li>
-          {% endif %}
-
         </ul>
 
+        {% set ver = namespace(num='5.0.13') %}
         <span class="navbar-text">  v. {{ ver.num }} <small>cbt</small> </span>
 
       </div>

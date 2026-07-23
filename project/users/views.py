@@ -325,14 +325,13 @@ def admin_reg_ver():
     if current_user.role != 'admin_master':
         abort(403)
     else:
-        users, sistema, inst = services.dados_config_sistema()
+        sistema, inst = services.dados_config_sistema()
 
         form = VerForm()
 
         if form.validate_on_submit():
 
             services.atualizar_config_sistema(
-                ver=form.ver.data,
                 nome_sistema=form.nome_sistema.data,
                 descritivo=form.descritivo.data,
                 funcionalidade_conv=form.funcionalidade_conv.data,
@@ -350,7 +349,6 @@ def admin_reg_ver():
         # traz a versão atual
         elif request.method == 'GET':
 
-            form.ver.data                   = users[0].sversion
             form.nome_sistema.data          = sistema.nome_sistema
             form.descritivo.data            = sistema.descritivo
             form.funcionalidade_conv.data   = sistema.funcionalidade_conv
