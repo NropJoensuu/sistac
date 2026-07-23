@@ -136,6 +136,58 @@ def registrar_usuario(email, username, password, coord, despacha0, despacha, des
     return user
 
 
+def cadastro_pendente_por_email(email):
+    """
+    Retorna o cadastro existente com esse e-mail, se ainda não tiver
+    sido confirmado (ou None, se não existir ou já estiver confirmado).
+    """
+    existente = User.query.filter_by(email=email).first()
+
+    if existente is not None and existente.email_confirmed != 1:
+        return existente
+
+    return None
+
+
+def username_pertence_a_outro(username, email):
+    """Verifica se o nome de usuário já pertence a outra pessoa (diferente do e-mail informado)."""
+    outro = User.query.filter_by(username=username).first()
+    return outro is not None and outro.email != email
+
+
+def refazer_cadastro_pendente(usuario_existente, username, password, coord, despacha0, despacha, despacha2):
+    """
+    Atualiza um cadastro ainda não confirmado com os novos dados
+    informados, e reenvia o e-mail de confirmação com um link novo.
+
+    Alternativa deliberada a bloquear o registro (ou exigir um admin
+    disponível): permite que a própria pessoa tente de novo a qualquer
+    momento, mesmo que o link de confirmação anterior tenha expirado,
+    sem depender de ninguém.
+    """
+    usuario_existente.username = username
+    usuario_existente.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+    usuario_existente.coord = coord
+    usuario_existente.despacha0 = 1 if despacha0 else 0
+    usuario_existente.despacha = 1 if despacha else 0
+    usuario_existente.despacha2 = 1 if despacha2 else 0
+    usuario_existente.email_confirmation_sent_on = datetime.now()
+
+    db.session.commit()
+
+    registra_log_auto(usuario_existente.id, None, 'usu')
+
+    coords = db.session.query(Coords.sigla).all()
+    if (coord,) not in coords:
+        nova_coord = Coords(sigla=coord, pai='')
+        db.session.add(nova_coord)
+        db.session.commit()
+
+    send_confirmation_email(usuario_existente.email)
+
+    return usuario_existente
+
+
 def confirmar_email(token):
     """
     Valida o token de confirmação de e-mail e marca o usuário como

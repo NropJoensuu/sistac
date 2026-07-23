@@ -74,6 +74,27 @@ def register():
 
     if form.validate_on_submit():
 
+        cadastro_pendente = services.cadastro_pendente_por_email(form.email.data)
+
+        if cadastro_pendente is not None:
+
+            if services.username_pertence_a_outro(form.username.data, form.email.data):
+                flash('Este nome de usuário já foi registrado! Por favor, escolha outro.','erro')
+                return render_template('register.html', form=form)
+
+            services.refazer_cadastro_pendente(
+                usuario_existente=cadastro_pendente,
+                username=form.username.data,
+                password=form.password.data,
+                coord=form.coord.data,
+                despacha0=form.despacha0.data,
+                despacha=form.despacha.data,
+                despacha2=form.despacha2.data,
+            )
+
+            flash('Usuário registrado! Verifique sua caixa de e-mail para confirmar o endereço. ATENÇÃO: o link de confirmação tem validade de apenas 1 hora!','sucesso')
+            return redirect(url_for('core.inicio'))
+
         try:
             form.check_username(form.username)
             form.check_email(form.email)
@@ -85,12 +106,12 @@ def register():
             username=form.username.data,
             password=form.password.data,
             coord=form.coord.data,
-            despacha0=form.despacha0,
-            despacha=form.despacha,
-            despacha2=form.despacha2,
+            despacha0=form.despacha0.data,
+            despacha=form.despacha.data,
+            despacha2=form.despacha2.data,
         )
 
-        flash('Usuário registrado! Verifique sua caixa de e-mail para confirmar o endereço.','sucesso')
+        flash('Usuário registrado! Verifique sua caixa de e-mail para confirmar o endereço. ATENÇÃO: o link de confirmação tem validade de apenas 1 hora!','sucesso')
         return redirect(url_for('core.inicio'))
 
     return render_template('register.html',form=form)
