@@ -1,5 +1,24 @@
 ## Atualizações ##
 
+29/07/2026
+Criação do papel Admin Master: tela "Dados gerais do sistema" (funcionalidades de
+Convênios/Acordos/Instrumentos, texto da página Sobre) restrita a esse papel, com
+cascata de remoção de permissão ao desabilitar uma funcionalidade. CRUD de unidades
+(criar/editar/transferir) também restrito ao Admin Master. Admin comum passa a ver e
+gerenciar apenas usuários da própria coordenação (e unidades-filhas); Admin Master
+continua sem restrição.
+Gestão de cadastros pendentes: admin pode confirmar e-mail manualmente, reenviar
+confirmação, ou excluir um cadastro ainda não confirmado.
+Usuário pode cancelar a própria conta (autoexclusão), preservando o histórico.
+Corrigido erro grave no registro de usuário que concedia despacho de chefe de
+serviço/coordenador/coordenador-geral automaticamente, independente do que era
+marcado no formulário.
+Registro de usuário com e-mail já existente, mas ainda não confirmado, agora
+atualiza o cadastro e reenvia a confirmação, em vez de bloquear.
+Removido aviso obsoleto de versão incorreta do sistema (mantido apenas o número da
+versão, sem a comparação).
+v5.0.14
+
 10/02/2025
 Correção em dadosSEI.fical na geração de pdf, o que impedia a consulta a alguns convênios.
 v5.0.13

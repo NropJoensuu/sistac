@@ -33,9 +33,11 @@ direto do arquivo pra buscar do banco. Frente própria, ainda não iniciada.
 Confirmar e-mail manualmente, reenviar confirmação, excluir cadastro não confirmado.
 Já implementado, testado e publicado.
 
-### 1.4 Fluxo "esqueci minha senha" — **verificar se já existe**
-Ainda não conferimos se esse fluxo existe e funciona bem. Vale checar antes de decidir
-se entra na lista de melhorias.
+### 1.4 Fluxo "esqueci minha senha" — **conferido, já está completo**
+Testado de ponta a ponta: solicitação por e-mail (com tratamento de e-mail
+inválido/não confirmado), token com expiração de 1h, troca de senha com hash
+correto (`pbkdf2:sha256`), tratamento de token inválido/expirado, link visível
+na tela de login. Nenhum bug encontrado, nenhuma ação necessária.
 
 ---
 

@@ -33,7 +33,7 @@ python app.py
 
 ## Versão atual
 
-v5.0.13
+v5.0.14
 
 ## Como contribuir
 1. Faça um fork do repositório
@@ -48,6 +48,7 @@ v5.0.13
 |--------|-----------|
 | Acordos | Cadastro e acompanhamento de acordos e TEDs |
 | Convênios | Gestão de convênios com integração SICONV |
+| Instrumentos | Cadastro e acompanhamento de instrumentos |
 | Bolsas | Controle de bolsas implementadas |
 | Bolsistas | Cadastro e acompanhamento de bolsistas |
 | Projetos | Gestão de projetos associados aos acordos |

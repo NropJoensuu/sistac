@@ -21,10 +21,6 @@ from project.models import User
 
 def test_registro_sem_marcar_despacho_nao_concede_despacho(client, app):
     """Regressão do bug grave: nenhum despacho deve ser concedido se não foi marcado."""
-    with app.app_context():
-        User.query.filter_by(email='teste.regsemdespacho@teste.com').delete()
-        db.session.commit()
-
     resp = client.post("/register", data={
         'email': 'teste.regsemdespacho@teste.com', 'username': 'usuarioregsemdespachoteste',
         'password': 'senha123', 'pass_confirm': 'senha123', 'coord': 'DPI',
@@ -39,10 +35,6 @@ def test_registro_sem_marcar_despacho_nao_concede_despacho(client, app):
 
 
 def test_registro_marcando_so_um_despacho_concede_so_esse(client, app):
-    with app.app_context():
-        User.query.filter_by(email='teste.regumdespacho@teste.com').delete()
-        db.session.commit()
-
     resp = client.post("/register", data={
         'email': 'teste.regumdespacho@teste.com', 'username': 'usuarioregumdespachoteste',
         'password': 'senha123', 'pass_confirm': 'senha123', 'coord': 'DPI', 'despacha0': 'y',
@@ -63,10 +55,6 @@ def test_reregistro_com_email_nao_confirmado_atualiza_em_vez_de_bloquear(client,
     mesmo e-mail (ainda não confirmado) deve atualizar o cadastro
     existente, não bloquear.
     """
-    with app.app_context():
-        User.query.filter_by(email='teste.reregistro@teste.com').delete()
-        db.session.commit()
-
     resp1 = client.post("/register", data={
         'email': 'teste.reregistro@teste.com', 'username': 'usuarioreregistrov1teste',
         'password': 'senhaoriginal', 'pass_confirm': 'senhaoriginal', 'coord': 'COPES',
