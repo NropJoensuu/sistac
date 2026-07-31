@@ -77,7 +77,29 @@ desejada — vou conferir o código específico quando chegarmos nesse item.
 
 ---
 
-## 6. Infraestrutura / Ambiente (fora do controle do código da aplicação)
+## 6. Convênios / TED / Acordos — reestruturação e BI (prioridade política atual)
+
+Contexto: há uma janela política em aberto (possível saída do presidente do CNPq no
+início do ano, por conta das eleições) para obter apoio à homologação/produção do
+sistema. Por isso, esta frente foi priorizada à frente de `Demandas`, que fica para
+outro momento.
+
+| # | Item | Descrição | Observação |
+|---|------|-----------|------------|
+| 6.1 | Renomear menu "Acordos/TEDs" | Remove a palavra "TEDs" do rótulo, fica só "Acordos" | Rápido, cosmético |
+| 6.2 | Criar aba própria de TED | Nova aba, nos moldes visuais do módulo Convênios | Estrutura de tela pode sair rápido; dado real depende do item 6.4 |
+| 6.3 | Melhorar o sentido de "Instrumentos" | Ainda não detalhado — se é o nome, a descrição, ou os dados exibidos | Aguardando detalhamento de Igor |
+| 6.4 | Integração de dados de TED (SICONV/transferegov) | TED hoje não existe como dado — é só um rótulo, misturado com Acordo. Precisa de fonte de dados nova (API/portal do transferegov a pesquisar) | Grande, não é rápido — não depende só de reorganizar tela |
+| 6.5 | Substituir 3 dashboards por BI | Em Convênios: "Em execução por UF e Programa", "Histórico por Programa", "Mapa". Mesmo tratamento para Acordos e (futuramente) TED | **Priorizado agora** — é a demanda visual mais direta dos gestores, e o SISTAC já tem os dados |
+| 6.6 | Integração futura TED + Acordos | Unificação de dados/fluxo entre os dois | Futuro, não priorizado agora |
+
+**Próximo passo combinado**: avançar com o item 6.5 (BI), já que é a demanda mais
+direta das chefias e o SISTAC já possui os dados necessários — só falta apresentá-los
+bem. Igor vai fornecer massa de dados anonimizada para uso no desenvolvimento.
+
+---
+
+## 7. Infraestrutura / Ambiente (fora do controle do código da aplicação)
 
 Itens que não se resolvem só editando `sistac` — dependem de configuração de servidor
 ou de decisões de infraestrutura do CNPq:
@@ -96,13 +118,10 @@ ou de decisões de infraestrutura do CNPq:
 
 ## Como sugiro seguirmos
 
-1. Fechar as decisões pendentes de papéis/permissão (itens 1.1 e 4.1 dependem da mesma
-   decisão — vale resolver isso primeiro, já que trava dois itens).
-2. Implementar 1.2 (autogestão de conta) e 1.4 (checar esqueci-senha) — ainda dentro
-   de `users`, como você pediu.
-3. Depois, os itens 2.x e 3.x (edição/exclusão em Bolsas e Programas CNPq) — mais
-   simples, sem decisão de produto pendente, só a implementação em si.
-4. Por último, 5.1 (revisão de CSV) e os itens de infraestrutura, que dependem de
-   confirmação externa ou de outra equipe.
+**Prioridade atual (janela política em aberto):** avançar com o item 6.5 (BI sobre
+Convênios/Acordos/TED) — é a frente escolhida por atender diretamente à demanda das
+chefias, usando dados que o sistema já possui.
 
-Faz sentido essa ordem, ou prefere atacar em outra sequência?
+Itens 1.x a 5.x seguem no backlog geral, concluídos ou pendentes conforme já registrado
+em cada seção — retomamos assim que a frente de BI e homologação estiver encaminhada.
+`Demandas` fica propositalmente de fora por enquanto, a pedido de Igor.
