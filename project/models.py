@@ -332,7 +332,31 @@ class grupo_programa_cnpq(db.Model):
         self.cod_programa = cod_programa
 
     def __repr__ (self):
-        return f"{self.id_acordo};{self.id_programa};{self.cod_programa}"        
+        return f"{self.id_acordo};{self.id_programa};{self.cod_programa}"
+
+#
+# vínculo Convênio -> Programa CNPq (curadoria manual, mesmo padrão de
+# grupo_programa_cnpq, mas para Convênios em vez de Acordos)
+
+class Convenio_Programa_CNPq(db.Model):
+
+    __tablename__ = 'convenio_programa_cnpq'
+
+    id                   = db.Column(db.Integer, primary_key = True)
+    nr_convenio          = db.Column(db.String)
+    id_programa          = db.Column(db.Integer)
+    cod_programa         = db.Column(db.String)
+    programa_estrategico = db.Column(db.String)
+
+    def __init__(self, nr_convenio, id_programa, cod_programa, programa_estrategico):
+
+        self.nr_convenio          = nr_convenio
+        self.id_programa          = id_programa
+        self.cod_programa         = cod_programa
+        self.programa_estrategico = programa_estrategico
+
+    def __repr__ (self):
+        return f"{self.nr_convenio};{self.id_programa};{self.cod_programa};{self.programa_estrategico}"
 
 # dados dos vários acordos
 class Acordo(db.Model):
