@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+
+  <div class="card border-primary mb-3">
+    <div class="card-header">
+      <h3>BI Acordos</h3>
+      <small class="text-muted">Visão consolidada da carteira de acordos (Etapa 2 do roadmap de BI) — todas as coordenações.</small>
+    </div>
+
+    <div class="card-body">
+
+      <div class="alert alert-warning" role="alert">
+        <strong>Pendência conhecida:</strong> os indicadores abaixo dependentes da cadeia de execução —
+        quantidade de processos mãe/filho, chamadas vinculadas, bolsistas ativos, situação de pagamentos
+        (em dia/pendente/atrasado) e o gráfico de funil Acordo &rarr; Processos mãe &rarr; Processos filho &rarr;
+        Chamadas &rarr; Bolsistas — ainda não estão disponíveis: essas tabelas vêm da integração com o
+        Data Warehouse Oracle do CNPq, não configurada neste ambiente. "Programa Estratégico" também
+        fica de fora, pelo mesmo motivo da tela de BI Convênios.
+      </div>
+
+      <form method="get" class="form-inline mb-4" action="{{ url_for('acordos.bi_acordos') }}">
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="programa">Programa CNPq:</label>
+          <select class="form-control" id="programa" name="programa">
+            <option value="">Todos</option>
+            {% for p in opcoes_programa %}
+              <option value="{{ p }}" {% if filtros.programa == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="situacao">Situação:</label>
+          <select class="form-control" id="situacao" name="situacao">
+            <option value="">Todas</option>
+            {% for s in opcoes_situacao %}
+              <option value="{{ s }}" {% if filtros.situacao == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="uf">UF:</label>
+          <select class="form-control" id="uf" name="uf">
+            <option value="">Todas</option>
+            {% for uf in opcoes_uf %}
+              <option value="{{ uf }}" {% if filtros.uf == uf %}selected{% endif %}>{{ uf }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="ano">Ano:</label>
+          <select class="form-control" id="ano" name="ano">
+            <option value="">Todos</option>
+            {% for a in opcoes_ano %}
+              <option value="{{ a }}" {% if filtros.ano == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary mb-2">Filtrar</button>
+        <a href="{{ url_for('acordos.bi_acordos') }}" class="btn btn-outline-secondary mb-2 ml-2">Limpar</a>
+      </form>
+
+      <!-- KPIs -->
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Valor total CNPq</span>
+              <h4>{{ valor_total_cnpq }}</h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Valor total EPE</span>
+              <h4>{{ valor_total_epe }}</h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Acordos (total)</span>
+              <h4>{{ situacoes | sum(attribute='qtd') }}</h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Vigência a vencer</span>
+              <h4>
+                {{ vigencia_a_vencer['3_meses'] }} <small class="font-weight-light">/3m</small> ·
+                {{ vigencia_a_vencer['6_meses'] }} <small class="font-weight-light">/6m</small> ·
+                {{ vigencia_a_vencer['12_meses'] }} <small class="font-weight-light">/12m</small>
+              </h4>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- gráficos -->
+      <div class="row mb-4">
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Acordos por situação</div>
+            <div class="card-body"><canvas id="chartSituacao"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Valor por Programa CNPq (top 10)</div>
+            <div class="card-body"><canvas id="chartProgramas"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Evolução anual (valor)</div>
+            <div class="card-body"><canvas id="chartEvolucao"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row mb-4">
+        <div class="col-md-12">
+          <div class="card">
+            <div class="card-header">Distribuição geográfica (UF)</div>
+            <div class="card-body">
+              {{ mapa_html | safe }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+  const situacoes = {{ situacoes | tojson }};
+  const programas = {{ programas | tojson }};
+  const evolucao = {{ evolucao | tojson }};
+
+  new Chart(document.getElementById('chartSituacao'), {
+    type: 'doughnut',
+    data: {
+      labels: situacoes.map(s => s.situacao),
+      datasets: [{ data: situacoes.map(s => s.qtd) }],
+    },
+  });
+
+  const top10Programas = programas.slice(0, 10);
+  new Chart(document.getElementById('chartProgramas'), {
+    type: 'bar',
+    data: {
+      labels: top10Programas.map(p => p.programa),
+      datasets: [{ label: 'Valor (R$)', data: top10Programas.map(p => p.valor) }],
+    },
+    options: { indexAxis: 'y' },
+  });
+
+  new Chart(document.getElementById('chartEvolucao'), {
+    type: 'line',
+    data: {
+      labels: evolucao.map(e => e.ano),
+      datasets: [{ label: 'Valor (R$)', data: evolucao.map(e => e.valor) }],
+    },
+  });
+</script>
+{% endblock %}

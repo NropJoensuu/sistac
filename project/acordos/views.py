@@ -822,6 +822,32 @@ def resumo_acordos():
                                                  unidade=current_user.coord)
 
 #
+## BI de acordos (Etapa 2 do roadmap_bi_sistac.md) — visão consolidada,
+## sem filtro de coordenação (ver docstring de services.bi_acordos)
+
+@acordos.route('/bi_acordos')
+@login_required
+def bi_acordos():
+    """
+    +---------------------------------------------------------------------------------------+
+    |Apresenta a visão consolidada de BI de Acordos: valor CNPq/EPE, distribuição por        |
+    |Programa CNPq, evolução temporal e vigência a vencer. Indicadores que dependem da       |
+    |cadeia processo mãe/filho/chamada/bolsista/pagamento (DW Oracle) ficam sinalizados       |
+    |como pendência na própria tela.                                                          |
+    +---------------------------------------------------------------------------------------+
+    """
+    filtros = {
+        'programa': request.args.get('programa') or None,
+        'situacao': request.args.get('situacao') or None,
+        'uf': request.args.get('uf') or None,
+        'ano': request.args.get('ano') or None,
+    }
+
+    dados = services.bi_acordos(filtros)
+
+    return render_template('bi_acordos.html', **dados)
+
+#
 ## RESUMO por nomes dos acordos
 
 @acordos.route('/<cod_programa>/<sigla>/edic_programa')

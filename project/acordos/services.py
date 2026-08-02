@@ -1618,3 +1618,147 @@ def demandas_do_acordo(acordo_id):
         'autores': autores,
         'dados': dados,
     }
+
+
+#
+## BI de acordos (Etapa 2 do roadmap_bi_sistac.md)
+
+def bi_acordos(filtros=None):
+    """
+    Monta os indicadores da tela de BI de Acordos: valor total (CNPq +
+    EPE) por situação, quantidade por situação, distribuição por
+    Programa CNPq, evolução anual e vigência a vencer em 3/6/12 meses.
+
+    Visão global (sem filtro de coordenação), mesma decisão de produto
+    do BI de Convênios.
+
+    Indicadores do roadmap que dependem da cadeia processo mãe/filho/
+    chamada/bolsista/pagamento (quantidade de processos, chamadas,
+    bolsistas, situação de pagamentos, gráfico de funil) ficam de fora
+    desta etapa: as tabelas processo_mae/processo_filho/chamadas_cnpq/
+    pagamentospdctr/acordo_procmae vêm da integração com o DW Oracle do
+    CNPq, não configurada neste ambiente (dívida técnica já documentada
+    em project/core/services.py) — não há dado real para mostrar.
+    "Programa Estratégico" também fica de fora, pela mesma razão da
+    Etapa 1: não existe como campo separado de Programa CNPq no schema.
+    """
+    filtros = filtros or {}
+
+    base = db.session.query(Acordo)
+
+    if filtros.get('situacao'):
+        base = base.filter(Acordo.situ == filtros['situacao'])
+    if filtros.get('uf'):
+        base = base.filter(Acordo.uf == filtros['uf'])
+    if filtros.get('ano'):
+        ano = filtros['ano']
+        base = base.filter(
+            Acordo.data_inicio >= datetime.date(int(ano), 1, 1),
+            Acordo.data_inicio <= datetime.date(int(ano), 12, 31),
+        )
+
+    if filtros.get('programa'):
+        base = base.join(grupo_programa_cnpq, grupo_programa_cnpq.id_acordo == Acordo.id)\
+                   .join(Programa_CNPq, Programa_CNPq.ID_PROGRAMA == grupo_programa_cnpq.id_programa)\
+                   .filter(Programa_CNPq.SIGLA_PROGRAMA == filtros['programa'])
+
+    acordos = base.all()
+
+    # valor (CNPq + EPE) e quantidade, por situação
+    por_situacao = {}
+    for ac in acordos:
+        sit = ac.situ or 'Não informado'
+        item = por_situacao.setdefault(sit, {'qtd': 0, 'valor_cnpq': 0.0, 'valor_epe': 0.0})
+        item['qtd'] += 1
+        item['valor_cnpq'] += ac.valor_cnpq or 0
+        item['valor_epe'] += ac.valor_epe or 0
+
+    situacoes = []
+    for sit, item in sorted(por_situacao.items()):
+        situacoes.append({
+            'situacao': sit,
+            'qtd': item['qtd'],
+            'valor_cnpq': item['valor_cnpq'],
+            'valor_epe': item['valor_epe'],
+        })
+
+    valor_total_cnpq = sum(item['valor_cnpq'] for item in por_situacao.values())
+    valor_total_epe = sum(item['valor_epe'] for item in por_situacao.values())
+
+    # distribuição por Programa CNPq — junta separadamente pra não perder
+    # acordos sem vínculo de programa nos indicadores gerais acima
+    ids_acordos = [ac.id for ac in acordos]
+    por_programa_rows = []
+    if ids_acordos:
+        por_programa_rows = db.session.query(
+            Programa_CNPq.SIGLA_PROGRAMA,
+            label('qtd', func.count(Acordo.id)),
+            label('valor', func.sum(Acordo.valor_cnpq + Acordo.valor_epe)),
+        ).join(grupo_programa_cnpq, grupo_programa_cnpq.id_programa == Programa_CNPq.ID_PROGRAMA)\
+         .join(Acordo, Acordo.id == grupo_programa_cnpq.id_acordo)\
+         .filter(Acordo.id.in_(ids_acordos))\
+         .group_by(Programa_CNPq.SIGLA_PROGRAMA)\
+         .all()
+
+    programas = sorted(
+        [{'programa': p.SIGLA_PROGRAMA or 'Sem sigla', 'qtd': p.qtd, 'valor': p.valor or 0.0}
+         for p in por_programa_rows],
+        key=lambda x: x['valor'], reverse=True,
+    )
+
+    # evolução temporal, por ano de início
+    por_ano = {}
+    for ac in acordos:
+        ano = str(ac.data_inicio.year) if ac.data_inicio else 'Não informado'
+        item = por_ano.setdefault(ano, {'qtd': 0, 'valor': 0.0})
+        item['qtd'] += 1
+        item['valor'] += (ac.valor_cnpq or 0) + (ac.valor_epe or 0)
+
+    evolucao = sorted(
+        [{'ano': ano, 'qtd': item['qtd'], 'valor': item['valor']} for ano, item in por_ano.items()],
+        key=lambda x: x['ano'],
+    )
+
+    # vigência a vencer em 3/6/12 meses
+    hoje = datetime.date.today()
+    janelas = {
+        '3_meses': hoje + datetime.timedelta(days=91),
+        '6_meses': hoje + datetime.timedelta(days=182),
+        '12_meses': hoje + datetime.timedelta(days=365),
+    }
+    vigencia_a_vencer = {chave: 0 for chave in janelas}
+    for ac in acordos:
+        fim = ac.data_fim
+        if fim and fim >= hoje:
+            for chave, limite in janelas.items():
+                if fim <= limite:
+                    vigencia_a_vencer[chave] += 1
+
+    # opções para o formulário de filtros (sem aplicar os filtros já
+    # escolhidos, pra não esconder opções da lista)
+    opcoes_programa = [p.SIGLA_PROGRAMA for p in db.session.query(Programa_CNPq.SIGLA_PROGRAMA)
+                       .join(grupo_programa_cnpq, grupo_programa_cnpq.id_programa == Programa_CNPq.ID_PROGRAMA)
+                       .filter(Programa_CNPq.SIGLA_PROGRAMA.isnot(None))
+                       .distinct().order_by(Programa_CNPq.SIGLA_PROGRAMA).all()]
+    opcoes_situacao = [a.situ for a in db.session.query(Acordo.situ)
+                       .filter(Acordo.situ.isnot(None))
+                       .distinct().order_by(Acordo.situ).all()]
+    opcoes_uf = [a.uf for a in db.session.query(Acordo.uf)
+                 .filter(Acordo.uf.isnot(None))
+                 .distinct().order_by(Acordo.uf).all()]
+    opcoes_ano = sorted({str(ac.data_inicio.year) for ac in acordos if ac.data_inicio}, reverse=True)
+
+    return {
+        'valor_total_cnpq': locale.currency(valor_total_cnpq, symbol=False, grouping=True),
+        'valor_total_epe': locale.currency(valor_total_epe, symbol=False, grouping=True),
+        'situacoes': situacoes,
+        'programas': programas,
+        'evolucao': evolucao,
+        'vigencia_a_vencer': vigencia_a_vencer,
+        'mapa_html': gerar_mapa_brasil_acordos(),
+        'filtros': filtros,
+        'opcoes_programa': opcoes_programa,
+        'opcoes_situacao': opcoes_situacao,
+        'opcoes_uf': opcoes_uf,
+        'opcoes_ano': opcoes_ano,
+    }
