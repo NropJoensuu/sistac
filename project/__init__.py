@@ -71,6 +71,8 @@ from project.convenios.views import convenios
 
 from project.instrumentos.views import instrumentos
 
+from project.ted.views import ted
+
 app.register_blueprint(core)
 app.register_blueprint(users)
 app.register_blueprint(demandas,url_prefix='/demandas')
@@ -82,3 +84,5 @@ app.register_blueprint(acordos,url_prefix='/acordos')
 app.register_blueprint(convenios,url_prefix='/convenios')
 
 app.register_blueprint(instrumentos,url_prefix='/instrumentos')
+
+app.register_blueprint(ted,url_prefix='/ted')

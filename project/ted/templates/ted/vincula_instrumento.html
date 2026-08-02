@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+<div class="jumbotron">
+
+<h4>Vincular Convênio/Acordo — {% if plano.numero_ted %}TED {{ plano.numero_ted }}{% else %}Plano {{ plano.id }}{% endif %}</h4>
+<p class="text-muted">Curadoria manual — não há chave comum entre o TransfereGov e o SICONV/registro interno de Acordos para automatizar este vínculo.</p>
+
+{% macro render_field(field,obr) %}
+  {% if obr == True %}
+    <dt>{{ field.label(class="form-control-label") }}<span class="text-danger font-weight-bold">*</span>
+  {% else %}
+    <dt>{{ field.label(class="form-control-label") }}
+  {% endif %}
+  <dd>{{ field(**kwargs)|safe }}
+  {% if field.errors %}
+    <ul class=errors>
+    {% for error in field.errors %}
+      <li><span class="text-danger font-weight-bold">{{ error }}</span></li>
+    {% endfor %}
+    </ul>
+  {% endif %}
+  </dd>
+{% endmacro %}
+
+<form method='POST'>
+  {{ form.hidden_tag() }}
+
+  <div class="form-group">
+    {{ render_field(form.tipo_instrumento,class="form-control",obr=True) }}
+  </div>
+
+  <div class="form-group">
+    {{ render_field(form.identificador,class="form-control",obr=True) }}
+    <small class="form-text text-muted">Número do Convênio (ex: 703590) ou o id do Acordo no SISTAC (visível na URL da tela de detalhes do Acordo).</small>
+  </div>
+
+  <div class="form-group">
+    {{ form.submit(class="btn btn-primary") }}
+    <a href="{{ url_for('ted.gestao') }}" class="btn btn-outline-secondary">Cancelar</a>
+  </div>
+
+</form>
+</div>
+</div>
+{% endblock %}

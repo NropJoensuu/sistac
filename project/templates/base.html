@@ -99,6 +99,12 @@
 
           {% endif %}
 
+          {% if current_user.is_authenticated %}
+            <li class="nav-item active">
+              <a class="nav-link" href="{{url_for('ted.gestao')}}">TED</a>
+            </li>
+          {% endif %}
+
           {% if current_user.is_authenticated and current_user.trab_instru == 1 %}
             <li class="nav-item dropdown">
               <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown2" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">

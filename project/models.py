@@ -358,6 +358,179 @@ class Convenio_Programa_CNPq(db.Model):
     def __repr__ (self):
         return f"{self.nr_convenio};{self.id_programa};{self.cod_programa};{self.programa_estrategico}"
 
+#
+# Módulo TED (Etapa 3 do roadmap de BI) — espelho reduzido da API pública
+# do TransfereGov (https://api.transferegov.gestao.gov.br/ted/) + tabelas
+# de curadoria manual. As tabelas-espelho usam a própria chave da API como
+# PK local (autoincrement=False) — a carga é delete-and-reload (mesmo
+# padrão de cargaSICONV), e as tabelas de curadoria abaixo referenciam
+# essas PKs; com autoincrement um reload quebraria os vínculos já curados.
+
+class TED_Programa(db.Model):
+
+    __tablename__ = 'ted_programa'
+
+    id                        = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    codigo_programa           = db.Column(db.String)
+    nome                      = db.Column(db.String)
+    unidade_descentralizadora = db.Column(db.String)
+    ano                       = db.Column(db.String)
+
+    def __init__(self, id, codigo_programa, nome, unidade_descentralizadora, ano):
+        self.id                        = id
+        self.codigo_programa           = codigo_programa
+        self.nome                      = nome
+        self.unidade_descentralizadora = unidade_descentralizadora
+        self.ano                       = ano
+
+    def __repr__(self):
+        return f"{self.id};{self.codigo_programa};{self.nome}"
+
+
+class TED_PlanoAcao(db.Model):
+
+    __tablename__ = 'ted_plano_acao'
+
+    id                            = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    numero_ted                    = db.Column(db.String)
+    id_programa                   = db.Column(db.Integer)
+    unidade_descentralizada       = db.Column(db.String)
+    situacao_plano                = db.Column(db.String)
+    objeto                        = db.Column(db.Text)
+    valor_beneficiario_especifico = db.Column(db.Float)
+    valor_chamamento_publico      = db.Column(db.Float)
+    vigencia_inicio                = db.Column(db.Date)
+    vigencia_fim                   = db.Column(db.Date)
+    ano                            = db.Column(db.String)
+
+    def __init__(self, id, numero_ted, id_programa, unidade_descentralizada, situacao_plano,
+                 objeto, valor_beneficiario_especifico, valor_chamamento_publico,
+                 vigencia_inicio, vigencia_fim, ano):
+        self.id                            = id
+        self.numero_ted                    = numero_ted
+        self.id_programa                   = id_programa
+        self.unidade_descentralizada       = unidade_descentralizada
+        self.situacao_plano                = situacao_plano
+        self.objeto                        = objeto
+        self.valor_beneficiario_especifico = valor_beneficiario_especifico
+        self.valor_chamamento_publico      = valor_chamamento_publico
+        self.vigencia_inicio               = vigencia_inicio
+        self.vigencia_fim                  = vigencia_fim
+        self.ano                           = ano
+
+    def __repr__(self):
+        return f"{self.id};{self.numero_ted};{self.situacao_plano}"
+
+
+class TED_TermoExecucao(db.Model):
+
+    __tablename__ = 'ted_termo_execucao'
+
+    id                = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    id_plano_acao      = db.Column(db.Integer)
+    situacao_termo     = db.Column(db.String)
+    data_assinatura    = db.Column(db.Date)
+    numero_ns_termo    = db.Column(db.String)
+    # ex-"SEI" da API (tx_num_processo_sei) — testado e confirmado NÃO
+    # confiável como SEI do CNPq (vem null na maioria, e quando
+    # preenchido pode ser referência de outra instituição). Guardado só
+    # como metadado bruto, nunca exibido como "SEI" na tela.
+    referencia_externa = db.Column(db.String)
+
+    def __init__(self, id, id_plano_acao, situacao_termo, data_assinatura, numero_ns_termo,
+                 referencia_externa):
+        self.id                 = id
+        self.id_plano_acao      = id_plano_acao
+        self.situacao_termo     = situacao_termo
+        self.data_assinatura    = data_assinatura
+        self.numero_ns_termo    = numero_ns_termo
+        self.referencia_externa = referencia_externa
+
+    def __repr__(self):
+        return f"{self.id};{self.id_plano_acao};{self.situacao_termo}"
+
+
+class TED_Execucao_Interna(db.Model):
+    """
+    Curadoria manual: quem no CNPq executa cada TED (coordenação) e o SEI
+    de verdade — a API do TransfereGov não desce desse nível (testado:
+    unidade_responsavel_execucao só chega até "CNPq" inteiro). Um plano
+    de ação pode ter várias linhas aqui (mais de uma coordenação, ou
+    execução compartilhada com outra instituição).
+    """
+
+    __tablename__ = 'ted_execucao_interna'
+
+    id                 = db.Column(db.Integer, primary_key=True)
+    id_plano_acao       = db.Column(db.Integer)
+    coordenacao         = db.Column(db.String)
+    sei_cnpq            = db.Column(db.String)
+    observacao          = db.Column(db.String)
+    usuario_curador_id  = db.Column(db.Integer)
+    data_registro       = db.Column(db.DateTime)
+
+    def __init__(self, id_plano_acao, coordenacao, sei_cnpq, observacao, usuario_curador_id,
+                 data_registro):
+        self.id_plano_acao      = id_plano_acao
+        self.coordenacao        = coordenacao
+        self.sei_cnpq           = sei_cnpq
+        self.observacao         = observacao
+        self.usuario_curador_id = usuario_curador_id
+        self.data_registro      = data_registro
+
+    def __repr__(self):
+        return f"{self.id_plano_acao};{self.coordenacao};{self.sei_cnpq}"
+
+
+class TED_Vinculo_ProgramaCNPq(db.Model):
+    """Curadoria manual — 'de-para' TED -> Programa CNPq, mesmo padrão de grupo_programa_cnpq."""
+
+    __tablename__ = 'ted_vinculo_programa_cnpq'
+
+    id                 = db.Column(db.Integer, primary_key=True)
+    id_plano_acao       = db.Column(db.Integer)
+    id_programa_cnpq    = db.Column(db.Integer)
+    tipo_evidencia       = db.Column(db.String)
+    usuario_curador_id  = db.Column(db.Integer)
+    data_vinculo         = db.Column(db.DateTime)
+
+    def __init__(self, id_plano_acao, id_programa_cnpq, tipo_evidencia, usuario_curador_id,
+                 data_vinculo):
+        self.id_plano_acao      = id_plano_acao
+        self.id_programa_cnpq   = id_programa_cnpq
+        self.tipo_evidencia     = tipo_evidencia
+        self.usuario_curador_id = usuario_curador_id
+        self.data_vinculo       = data_vinculo
+
+    def __repr__(self):
+        return f"{self.id_plano_acao};{self.id_programa_cnpq};{self.tipo_evidencia}"
+
+
+class TED_Vinculo_Instrumento(db.Model):
+    """Curadoria manual — liga um TED a um Convênio e/ou Acordo já existente, quando aplicável."""
+
+    __tablename__ = 'ted_vinculo_instrumento'
+
+    id                 = db.Column(db.Integer, primary_key=True)
+    id_plano_acao       = db.Column(db.Integer)
+    tipo_instrumento    = db.Column(db.String)  # 'convenio' | 'acordo'
+    nr_convenio         = db.Column(db.String)
+    id_acordo           = db.Column(db.Integer)
+    usuario_curador_id  = db.Column(db.Integer)
+    data_vinculo         = db.Column(db.DateTime)
+
+    def __init__(self, id_plano_acao, tipo_instrumento, nr_convenio, id_acordo,
+                 usuario_curador_id, data_vinculo):
+        self.id_plano_acao      = id_plano_acao
+        self.tipo_instrumento   = tipo_instrumento
+        self.nr_convenio        = nr_convenio
+        self.id_acordo          = id_acordo
+        self.usuario_curador_id = usuario_curador_id
+        self.data_vinculo       = data_vinculo
+
+    def __repr__(self):
+        return f"{self.id_plano_acao};{self.tipo_instrumento};{self.nr_convenio or self.id_acordo}"
+
 # dados dos vários acordos
 class Acordo(db.Model):
 

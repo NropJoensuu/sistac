@@ -11,6 +11,8 @@
 /project/error_pages/__pycache__
 /project/instrumentos/__pycache__
 /project/users/__pycache__
+/project/ted/__pycache__
+/project/ted/templates/ted/__pycache__
 /compose.yaml
 /project/static/convenio.pdf
 /project/static/procedimentos.pdf

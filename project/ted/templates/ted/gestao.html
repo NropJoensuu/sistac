@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+
+  <div class="card border-primary mb-3">
+    <div class="card-header">
+      <h3>Gestão de TED</h3>
+      <small class="text-muted">Termos de Execução Descentralizada recebidos pelo CNPq — carregados da API pública do TransfereGov.</small>
+    </div>
+
+    <div class="card-body">
+
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="text-muted" style="font-size:0.9rem">{{ teds | length }} TED(s) na listagem</div>
+        <form method="post" action="{{ url_for('ted.carrega') }}">
+          <button type="submit" class="btn btn-outline-primary btn-sm">Atualizar da API do TransfereGov</button>
+        </form>
+      </div>
+
+      <form method="get" class="form-inline mb-4" action="{{ url_for('ted.gestao') }}">
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">Órgão de origem:</label>
+          <select class="form-control" name="orgao">
+            <option value="">Todos</option>
+            {% for o in orgaos %}
+              <option value="{{ o }}" {% if filtros.orgao == o %}selected{% endif %}>{{ o }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">Situação:</label>
+          <select class="form-control" name="situacao">
+            <option value="">Todas</option>
+            {% for s in situacoes %}
+              <option value="{{ s }}" {% if filtros.situacao == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">Ano:</label>
+          <select class="form-control" name="ano">
+            <option value="">Todos</option>
+            {% for a in anos %}
+              <option value="{{ a }}" {% if filtros.ano == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">Programa CNPq:</label>
+          <select class="form-control" name="programa_cnpq">
+            <option value="">Todos</option>
+            <option value="vinculado" {% if filtros.programa_cnpq == 'vinculado' %}selected{% endif %}>Vinculado</option>
+            <option value="pendente" {% if filtros.programa_cnpq == 'pendente' %}selected{% endif %}>Pendente de curadoria</option>
+          </select>
+        </div>
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">Buscar:</label>
+          <input class="form-control" type="text" name="busca" value="{{ filtros.busca or '' }}" placeholder="Número do TED, objeto…">
+        </div>
+        <button type="submit" class="btn btn-primary mb-2">Filtrar</button>
+        <a href="{{ url_for('ted.gestao') }}" class="btn btn-outline-secondary mb-2 ml-2">Limpar</a>
+      </form>
+
+      <div class="table-responsive">
+        <table class="table table-striped table-sm">
+          <thead>
+            <tr>
+              <th>TED / Plano de ação</th>
+              <th>Órgão de origem</th>
+              <th>Situação</th>
+              <th class="text-right">Valor</th>
+              <th>Vigência</th>
+              <th>Programa CNPq</th>
+              <th>SEI / execução (CNPq)</th>
+              <th>Convênio / Acordo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in teds %}
+              {% set plano = item.plano %}
+              <tr>
+                <td>
+                  <div class="font-weight-bold">
+                    {% if plano.numero_ted %}TED {{ plano.numero_ted }}{% else %}Plano {{ plano.id }}{% endif %}
+                  </div>
+                  {% if plano.objeto %}
+                    <div class="text-muted" style="font-size:0.8rem;max-width:280px">{{ plano.objeto[:120] }}{% if plano.objeto|length > 120 %}…{% endif %}</div>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if item.programa %}
+                    <span class="badge badge-secondary">{{ item.programa.unidade_descentralizadora }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div><span class="badge badge-info">{{ plano.situacao_plano or '—' }}</span></div>
+                  {% if item.situacao_termo %}
+                    <div class="mt-1"><span class="badge badge-success">{{ item.situacao_termo }}</span></div>
+                  {% endif %}
+                </td>
+                <td class="text-right">
+                  {% set valor_total = (plano.valor_beneficiario_especifico or 0) + (plano.valor_chamamento_publico or 0) %}
+                  {% if valor_total %}{{ '{:,.2f}'.format(valor_total).replace(',', 'X').replace('.', ',').replace('X', '.') }}{% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if plano.vigencia_inicio and plano.vigencia_fim %}
+                    {{ plano.vigencia_inicio.strftime('%d/%m/%y') }}–{{ plano.vigencia_fim.strftime('%d/%m/%y') }}
+                  {% else %}
+                    {{ plano.ano or '—' }}
+                  {% endif %}
+                </td>
+                <td>
+                  {% if item.programa_cnpq_nome %}
+                    <span class="badge badge-success">{{ item.programa_cnpq_nome }}</span>
+                  {% else %}
+                    <a href="{{ url_for('ted.vincula_programa_cnpq', id_plano_acao=plano.id) }}" class="badge badge-warning">Pendente de curadoria</a>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if item.execucoes %}
+                    <span class="badge badge-success">{{ item.execucoes | length }} registrada(s)</span>
+                  {% else %}
+                    <a href="{{ url_for('ted.registra_execucao', id_plano_acao=plano.id) }}" class="badge badge-warning">Pendente</a>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if item.instrumento %}
+                    <span class="badge badge-success">
+                      {% if item.instrumento.tipo_instrumento == 'convenio' %}Convênio {{ item.instrumento.nr_convenio }}{% else %}Acordo #{{ item.instrumento.id_acordo }}{% endif %}
+                    </span>
+                  {% else %}
+                    <a href="{{ url_for('ted.vincula_instrumento', id_plano_acao=plano.id) }}" class="badge badge-light border">Nenhum</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="8" class="text-center text-muted py-4">Nenhum TED carregado ainda — clique em "Atualizar da API do TransfereGov".</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="alert alert-warning mt-3" role="alert" style="font-size:0.85rem">
+        <strong>Pendência conhecida:</strong> quantidade de processos mãe/filho, chamadas vinculadas,
+        bolsistas ativos, situação de pagamentos e o gráfico de funil (Acordo → Processos mãe →
+        Processos filho → Chamadas → Bolsistas) ainda não estão disponíveis — dependem da integração
+        com o DW Oracle, não configurada neste ambiente. "Programa Estratégico" também fica de fora,
+        mesmo motivo do BI de Convênios/Acordos.
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
