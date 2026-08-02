@@ -1147,3 +1147,155 @@ def resumo_convenios(unidade):
         programas_s.append(prog_s)
 
     return programas_s, str(data_carga[0])
+
+
+#
+## BI de convênios (Etapa 1 do roadmap_bi_sistac.md)
+
+def bi_convenios(filtros=None):
+    """
+    Monta os indicadores da tela de BI de Convênios: valor em carteira
+    por situação, taxa de desembolso, quantidade por situação,
+    distribuição por programa, evolução temporal por ano, vigência a
+    vencer em 3/6/12 meses e ranking de parceiros/FAPs por volume.
+
+    Visão global (sem filtro de coordenação), ao contrário de
+    quadro_convenios/resumo_convenios — decisão de produto: esta tela é
+    a "visão consolidada para a gestão" que o roadmap pede, não uma
+    visão operacional por coordenação.
+
+    "Distribuição por Programa CNPq" e "Programa Estratégico" ficam de
+    fora de propósito: não existe vínculo Convenio -> Programa_CNPq no
+    banco do SISTAC (Programa_CNPq só é usado em Acordos) — esse
+    vínculo hoje só existe na planilha externa mantida fora do sistema,
+    fora do escopo desta etapa (ver proposta_ted_bi.md).
+    """
+    filtros = filtros or {}
+
+    base = db.session.query(Convenio, Proposta, Programa_Interesse.sigla)\
+                     .join(Proposta, Proposta.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
+                     .join(Programa, Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
+                     .outerjoin(Programa_Interesse, Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)
+
+    if filtros.get('programa'):
+        base = base.filter(Programa_Interesse.sigla == filtros['programa'])
+    if filtros.get('uf'):
+        base = base.filter(Proposta.UF_PROPONENTE == filtros['uf'])
+    if filtros.get('parceiro'):
+        base = base.filter(Proposta.NM_PROPONENTE.ilike('%' + filtros['parceiro'] + '%'))
+    if filtros.get('situacao'):
+        base = base.filter(Convenio.SIT_CONVENIO == filtros['situacao'])
+    if filtros.get('ano'):
+        base = base.filter(Convenio.ANO == filtros['ano'])
+
+    convenios = base.all()
+
+    # valor em carteira e quantidade, por situação
+    por_situacao = {}
+    for conv, prop, sigla in convenios:
+        sit = conv.SIT_CONVENIO or 'Não informado'
+        item = por_situacao.setdefault(sit, {'qtd': 0, 'valor': 0.0, 'repasse': 0.0, 'desembolsado': 0.0})
+        item['qtd'] += 1
+        item['valor'] += none_0(conv.VL_REPASSE_CONV) + none_0(conv.VL_CONTRAPARTIDA_CONV)
+        item['repasse'] += none_0(conv.VL_REPASSE_CONV)
+        item['desembolsado'] += none_0(conv.VL_DESEMBOLSADO_CONV)
+
+    total_repasse = sum(none_0(c.VL_REPASSE_CONV) for c, p, s in convenios)
+    total_desembolsado = sum(none_0(c.VL_DESEMBOLSADO_CONV) for c, p, s in convenios)
+    taxa_desembolso_geral = round(100 * total_desembolsado / total_repasse) if total_repasse else 0
+
+    situacoes = []
+    for sit, item in sorted(por_situacao.items()):
+        taxa = round(100 * item['desembolsado'] / item['repasse']) if item['repasse'] else 0
+        situacoes.append({
+            'situacao': sit,
+            'qtd': item['qtd'],
+            'valor': item['valor'],
+            'valor_fmt': locale.currency(item['valor'], symbol=False, grouping=True),
+            'taxa_desembolso': taxa,
+        })
+
+    valor_total_carteira = sum(item['valor'] for item in por_situacao.values())
+
+    # distribuição por programa (orçamentário, via Programa_Interesse)
+    por_programa = {}
+    for conv, prop, sigla in convenios:
+        nome = sigla or 'Sem programa de interesse cadastrado'
+        item = por_programa.setdefault(nome, {'qtd': 0, 'valor': 0.0})
+        item['qtd'] += 1
+        item['valor'] += none_0(conv.VL_REPASSE_CONV) + none_0(conv.VL_CONTRAPARTIDA_CONV)
+
+    programas = sorted(
+        [{'programa': nome, 'qtd': item['qtd'], 'valor': item['valor']} for nome, item in por_programa.items()],
+        key=lambda x: x['valor'], reverse=True,
+    )
+
+    # evolução temporal, por ano
+    por_ano = {}
+    for conv, prop, sigla in convenios:
+        ano = conv.ANO or 'Não informado'
+        item = por_ano.setdefault(ano, {'qtd': 0, 'valor': 0.0})
+        item['qtd'] += 1
+        item['valor'] += none_0(conv.VL_REPASSE_CONV) + none_0(conv.VL_CONTRAPARTIDA_CONV)
+
+    evolucao = sorted(
+        [{'ano': ano, 'qtd': item['qtd'], 'valor': item['valor']} for ano, item in por_ano.items()],
+        key=lambda x: x['ano'],
+    )
+
+    # vigência a vencer em 3/6/12 meses (só convênios com vigência futura)
+    hoje = date.today()
+    janelas = {
+        '3_meses': hoje + dt.timedelta(days=91),
+        '6_meses': hoje + dt.timedelta(days=182),
+        '12_meses': hoje + dt.timedelta(days=365),
+    }
+    vigencia_a_vencer = {chave: 0 for chave in janelas}
+    for conv, prop, sigla in convenios:
+        fim = conv.DIA_FIM_VIGENC_CONV
+        if fim and fim >= hoje:
+            for chave, limite in janelas.items():
+                if fim <= limite:
+                    vigencia_a_vencer[chave] += 1
+
+    # ranking de parceiros/FAPs por volume de recursos (top 15)
+    por_parceiro = {}
+    for conv, prop, sigla in convenios:
+        nome = prop.NM_PROPONENTE or 'Não informado'
+        por_parceiro[nome] = por_parceiro.get(nome, 0.0) + none_0(conv.VL_REPASSE_CONV)
+
+    ranking_parceiros = sorted(
+        [{'parceiro': nome, 'valor': valor} for nome, valor in por_parceiro.items()],
+        key=lambda x: x['valor'], reverse=True,
+    )[:15]
+
+    # opções para o formulário de filtros — deliberadamente NÃO aplicam os
+    # filtros já escolhidos, para não esconder opções da lista
+    opcoes_programa = [p.sigla for p in db.session.query(Programa_Interesse.sigla)
+                       .filter(Programa_Interesse.sigla.isnot(None))
+                       .distinct().order_by(Programa_Interesse.sigla).all()]
+    opcoes_uf = [p.UF_PROPONENTE for p in db.session.query(Proposta.UF_PROPONENTE)
+                 .filter(Proposta.UF_PROPONENTE.isnot(None))
+                 .distinct().order_by(Proposta.UF_PROPONENTE).all()]
+    opcoes_situacao = [p.SIT_CONVENIO for p in db.session.query(Convenio.SIT_CONVENIO)
+                       .filter(Convenio.SIT_CONVENIO.isnot(None))
+                       .distinct().order_by(Convenio.SIT_CONVENIO).all()]
+    opcoes_ano = [p.ANO for p in db.session.query(Convenio.ANO)
+                  .filter(Convenio.ANO.isnot(None))
+                  .distinct().order_by(Convenio.ANO.desc()).all()]
+
+    return {
+        'valor_total_carteira': locale.currency(valor_total_carteira, symbol=False, grouping=True),
+        'taxa_desembolso_geral': taxa_desembolso_geral,
+        'situacoes': situacoes,
+        'programas': programas,
+        'evolucao': evolucao,
+        'vigencia_a_vencer': vigencia_a_vencer,
+        'ranking_parceiros': ranking_parceiros,
+        'mapa_html': gerar_mapa_brasil_convenios(),
+        'filtros': filtros,
+        'opcoes_programa': opcoes_programa,
+        'opcoes_uf': opcoes_uf,
+        'opcoes_situacao': opcoes_situacao,
+        'opcoes_ano': opcoes_ano,
+    }

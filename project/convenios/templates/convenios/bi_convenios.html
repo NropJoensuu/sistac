@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+
+  <div class="card border-primary mb-3">
+    <div class="card-header">
+      <h3>BI Convênios</h3>
+      <small class="text-muted">Visão consolidada da carteira de convênios (Etapa 1 do roadmap de BI) — todas as coordenações.</small>
+    </div>
+
+    <div class="card-body">
+
+      <div class="alert alert-warning" role="alert">
+        <strong>Pendência conhecida:</strong> "Distribuição por Programa CNPq" e "Programa Estratégico" ainda não
+        estão disponíveis nesta tela — o vínculo Convênio &rarr; Programa CNPq hoje só existe em planilha externa,
+        fora do SISTAC. O indicador abaixo usa o Programa (orçamentário) já cadastrado no sistema.
+      </div>
+
+      <form method="get" class="form-inline mb-4" action="{{ url_for('convenios.bi_convenios') }}">
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="programa">Programa:</label>
+          <select class="form-control" id="programa" name="programa">
+            <option value="">Todos</option>
+            {% for p in opcoes_programa %}
+              <option value="{{ p }}" {% if filtros.programa == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="uf">UF:</label>
+          <select class="form-control" id="uf" name="uf">
+            <option value="">Todas</option>
+            {% for uf in opcoes_uf %}
+              <option value="{{ uf }}" {% if filtros.uf == uf %}selected{% endif %}>{{ uf }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="situacao">Situação:</label>
+          <select class="form-control" id="situacao" name="situacao">
+            <option value="">Todas</option>
+            {% for s in opcoes_situacao %}
+              <option value="{{ s }}" {% if filtros.situacao == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="ano">Ano:</label>
+          <select class="form-control" id="ano" name="ano">
+            <option value="">Todos</option>
+            {% for a in opcoes_ano %}
+              <option value="{{ a }}" {% if filtros.ano == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="parceiro">Parceiro/FAP:</label>
+          <input class="form-control" type="text" id="parceiro" name="parceiro" value="{{ filtros.parceiro or '' }}" placeholder="nome do parceiro">
+        </div>
+
+        <button type="submit" class="btn btn-primary mb-2">Filtrar</button>
+        <a href="{{ url_for('convenios.bi_convenios') }}" class="btn btn-outline-secondary mb-2 ml-2">Limpar</a>
+      </form>
+
+      <!-- KPIs -->
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Valor total em carteira</span>
+              <h4>{{ valor_total_carteira }}</h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Taxa de desembolso geral</span>
+              <h4>{{ taxa_desembolso_geral }}%</h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Convênios (total)</span>
+              <h4>{{ situacoes | sum(attribute='qtd') }}</h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Vigência a vencer</span>
+              <h4>
+                {{ vigencia_a_vencer['3_meses'] }} <small class="font-weight-light">/3m</small> ·
+                {{ vigencia_a_vencer['6_meses'] }} <small class="font-weight-light">/6m</small> ·
+                {{ vigencia_a_vencer['12_meses'] }} <small class="font-weight-light">/12m</small>
+              </h4>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- gráficos -->
+      <div class="row mb-4">
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Convênios por situação</div>
+            <div class="card-body"><canvas id="chartSituacao"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Valor por Programa (top 10)</div>
+            <div class="card-body"><canvas id="chartProgramas"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Evolução anual (valor)</div>
+            <div class="card-body"><canvas id="chartEvolucao"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row mb-4">
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header">Ranking de parceiros/FAPs por volume (top 15)</div>
+            <div class="card-body"><canvas id="chartParceiros"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header">Distribuição geográfica (UF)</div>
+            <div class="card-body">
+              {{ mapa_html | safe }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+  const situacoes = {{ situacoes | tojson }};
+  const programas = {{ programas | tojson }};
+  const evolucao = {{ evolucao | tojson }};
+  const ranking = {{ ranking_parceiros | tojson }};
+
+  new Chart(document.getElementById('chartSituacao'), {
+    type: 'doughnut',
+    data: {
+      labels: situacoes.map(s => s.situacao),
+      datasets: [{ data: situacoes.map(s => s.qtd) }],
+    },
+  });
+
+  const top10Programas = programas.slice(0, 10);
+  new Chart(document.getElementById('chartProgramas'), {
+    type: 'bar',
+    data: {
+      labels: top10Programas.map(p => p.programa),
+      datasets: [{ label: 'Valor (R$)', data: top10Programas.map(p => p.valor) }],
+    },
+    options: { indexAxis: 'y' },
+  });
+
+  new Chart(document.getElementById('chartEvolucao'), {
+    type: 'line',
+    data: {
+      labels: evolucao.map(e => e.ano),
+      datasets: [{ label: 'Valor (R$)', data: evolucao.map(e => e.valor) }],
+    },
+  });
+
+  new Chart(document.getElementById('chartParceiros'), {
+    type: 'bar',
+    data: {
+      labels: ranking.map(r => r.parceiro),
+      datasets: [{ label: 'Valor (R$)', data: ranking.map(r => r.valor) }],
+    },
+    options: { indexAxis: 'y' },
+  });
+</script>
+{% endblock %}

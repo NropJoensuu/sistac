@@ -35,6 +35,7 @@
     * Lista os convênios conforme selecionado no quado de convênios: lista_convenios_mapa
     * Lista todos os convênios de uma UF selecionada no quado de convênios: lista_convenios_uf
     * Mostra dados gerais dos programas e seus convênios: resumo_convenios
+    * Mostra o BI consolidado de convênios (Etapa 1 do roadmap de BI): bi_convenios
 
 """
 
@@ -386,3 +387,29 @@ def resumo_convenios():
     programas_s, data_carga = services.resumo_convenios(current_user.coord)
 
     return render_template('resumo_convenios.html', programas=programas_s, data_carga=data_carga)
+
+#
+## BI de convênios (Etapa 1 do roadmap_bi_sistac.md) — visão consolidada, sem
+## filtro de coordenação (ver docstring de services.bi_convenios)
+
+@convenios.route('/bi_convenios')
+@login_required
+def bi_convenios():
+    """
+    +---------------------------------------------------------------------------------------+
+    |Apresenta a visão consolidada de BI de Convênios: valor em carteira, taxa de           |
+    |desembolso, distribuição por programa/UF/situação, evolução temporal,                  |
+    |vigência a vencer e ranking de parceiros/FAPs.                                          |
+    +---------------------------------------------------------------------------------------+
+    """
+    filtros = {
+        'programa': request.args.get('programa') or None,
+        'uf': request.args.get('uf') or None,
+        'parceiro': request.args.get('parceiro') or None,
+        'situacao': request.args.get('situacao') or None,
+        'ano': request.args.get('ano') or None,
+    }
+
+    dados = services.bi_convenios(filtros)
+
+    return render_template('bi_convenios.html', **dados)
