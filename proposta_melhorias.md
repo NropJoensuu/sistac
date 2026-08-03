@@ -50,6 +50,19 @@ Nota antiga: não é possível excluir uma modalidade depois de cadastrada.
 Sugestão sua: hoje o campo modalidade parece misturar sigla e nome completo. Seria
 adicionar um campo novo (`nome_completo`) mantendo `modalidade` como a sigla.
 
+### 2.3 Tela de upload de `cargaPDCTR` só aceita `.xls` — **pendente, decisão deliberada**
+`cargaPDCTR` foi migrada de `xlrd` (`.xls`) para `openpyxl` (`.xlsx`) pra ler a
+planilha real usada por você (fonte diferente da COSAO original, que também não
+tem a coluna "Sexo Proc. Filho" — virou campo opcional, gravado como `None`
+quando ausente). A tela `/carregaPDCTR` continua usando `ArquivoForm`
+(`project/acordos/forms.py`), que só aceita `.xls` no upload
+(`FileAllowed(['xls'], ...)`) — decisão deliberada de não mexer nesse form
+agora, porque ele é compartilhado com outras 3 rotas de upload, e você está
+rodando a carga direto no terminal (`carga_pdctr_direta.py`), não pela tela.
+Se um dia for preciso fazer upload de `.xlsx` pela tela, a opção mais segura é
+uma classe de form nova (`ArquivoXlsxForm`, aceitando `['xls', 'xlsx']`) usada
+só nessa rota, sem tocar no `ArquivoForm` compartilhado.
+
 ## 3. Acordos / Programas CNPq
 
 ### 3.1 Editar/excluir programa após inserido — **lacuna**

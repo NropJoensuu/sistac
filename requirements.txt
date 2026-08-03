@@ -58,3 +58,4 @@ Werkzeug==3.1.8
 WTForms==3.2.2
 xlrd==2.0.2
 xyzservices==2026.3.0
+openpyxl==3.1.5

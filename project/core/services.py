@@ -78,7 +78,8 @@ import urllib.request
 import csv
 from threading import Thread
 
-import xlrd
+import xlrd  # mantido: outras partes do sistema ainda podem usar
+import openpyxl
 import oracledb
 from werkzeug.utils import secure_filename
 from flask import flash, redirect, url_for
@@ -179,7 +180,6 @@ def agendar_cargas_iniciais():
 # =============================================================================
 # Cargas de arquivo
 # =============================================================================
-
 def cargaPDCTR(entrada):
 
     data_referência = ''
@@ -189,38 +189,52 @@ def cargaPDCTR(entrada):
                                 'Modalidade','Cat Nivel','Cod Programa','Grande Área','Área de Conhecimento','Sigla Instituição',
                                 'UF Instituição','Cidade Instituição','Data do Pagamento','Tipo de Pagamento','Valor Pago','Sit Mãe']
 
+    # Campos que, se ausentes na planilha, geram só um aviso e são gravados
+    # como None — não impedem a carga. Adicionado porque a planilha de
+    # substituição temporária ao DW não tem "Sexo Proc. Filho".
+    campos_opcionais = ['Sexo Proc. Filho']
+
     print ('\n')
     print ('<<',dt.now().strftime("%x %X"),'>> ',' Carga de arquivo de folha de pagamento iniciada...')
 
-    # abre arquivo (book), planilha (sheet) e linha com os nomes dos campos (linha_cabeçalho)
+    # abre arquivo (book) e planilha (sheet) via openpyxl — lê .xlsx.
+    # (o xlrd usado antes só lê o formato antigo .xls)
+    book = openpyxl.load_workbook(filename=entrada, data_only=True, read_only=True)
+    planilha = book.worksheets[0]
 
-    book = xlrd.open_workbook(filename=entrada,ragged_rows=True)
-    planilha = book.sheet_by_index(0)
+    linhas_planilha = list(planilha.iter_rows(values_only=True))
+
+    campos_obrigatorios = [c for c in campos_bolsistas_para_db if c not in campos_opcionais]
 
     procura_cabeçalho = 0
 
-    while planilha.row_len(procura_cabeçalho) < len(campos_bolsistas_para_db):
+    while len([v for v in linhas_planilha[procura_cabeçalho] if v is not None]) < len(campos_obrigatorios):
 
         procura_cabeçalho += 1
 
-    linha_cabeçalho = planilha.row_values(procura_cabeçalho, start_colx=0, end_colx=None)
+    linha_cabeçalho = list(linhas_planilha[procura_cabeçalho])
 
-    linha_cabeçalho_lower = [item.lower() for item in linha_cabeçalho]
+    linha_cabeçalho_lower = [str(item).lower() if item is not None else '' for item in linha_cabeçalho]
+
+    campos_ausentes = []
 
     for campo in campos_bolsistas_para_db:
         if campo.lower() not in linha_cabeçalho_lower:
-            print ('** ATENÇÃO: o campo ',campo,' não existe na planinha original, verifique o parâmetro inserido. **')
-            flash('ERRO! O campo '+str(campo)+' não existe na planinha original, verifique o parâmetro inserido.','erro')
-            return redirect(url_for('core.inicio'))
+            if campo in campos_opcionais:
+                campos_ausentes.append(campo)
+                print('** AVISO: o campo opcional "'+campo+'" não existe na planilha — será gravado vazio. **')
+            else:
+                print ('** ATENÇÃO: o campo ',campo,' não existe na planinha original, verifique o parâmetro inserido. **')
+                flash('ERRO! O campo '+str(campo)+' não existe na planinha original, verifique o parâmetro inserido.','erro')
+                return redirect(url_for('core.inicio'))
 
     try:
-        data_referência = planilha.cell_value(3,1)[-10:]
+        data_referência = str(linhas_planilha[3][1])[-10:]
         data_referência = datetime.date(int(data_referência[-4:]),int(data_referência[-7:-5]),
                                          int(data_referência[0:2]))
     except:
-
         try:
-            data_referência = planilha.cell_value(3,0)[-10:]
+            data_referência = str(linhas_planilha[3][0])[-10:]
             data_referência = datetime.date(int(data_referência[-4:]),int(data_referência[-7:-5]),
                                              int(data_referência[0:2]))
         except:
@@ -230,51 +244,44 @@ def cargaPDCTR(entrada):
     print ('Planilha: CNPq')
     print (f'Cabeçalho original: {len(linha_cabeçalho)} campos')
     print (f'Cabeçalho após extração: {len(campos_bolsistas_para_db)} campos')
-    print (f'Quantidade de registros na planilha: {planilha.nrows - procura_cabeçalho - 1 }')
+    print (f'Quantidade de registros na planilha: {len(linhas_planilha) - procura_cabeçalho - 1 }')
     print ('Começará a extração com o cabeçalho na linha ',procura_cabeçalho + 1)
     print ('Data de referência: ', data_referência)
     print ('\n')
 
-    qtd_linhas = planilha.nrows - procura_cabeçalho - 1
-
-    # varre linha por linha da planilha de entrada
+    qtd_linhas = len(linhas_planilha) - procura_cabeçalho - 1
 
     print ('<<',dt.now().strftime("%x %X"),'>> ',' Gravando dados no banco...')
 
     for i in range(qtd_linhas):
 
-        linha_base = planilha.row_values(i + procura_cabeçalho + 1 , start_colx=0, end_colx=None)
+        linha_base = linhas_planilha[i + procura_cabeçalho + 1]
 
         linha = []
-        iter  = 0
-
-        # pega os campos de interess na planilha conforme o defindo em campos_bolsistas_para_db
 
         for campo in campos_bolsistas_para_db:
 
-            dado_célula = planilha.cell_value(i + procura_cabeçalho + 1,
-                                                               linha_cabeçalho_lower.index(campo.lower()))
-            tipo_célula = planilha.cell_type (i + procura_cabeçalho + 1,
-                                                               linha_cabeçalho_lower.index(campo.lower()))
+            if campo in campos_ausentes:
+                linha.append(None)
+                continue
 
-            if str(dado_célula) == '':  # células vazias recebem None
+            idx = linha_cabeçalho_lower.index(campo.lower())
+            dado_célula = linha_base[idx] if idx < len(linha_base) else None
+
+            if dado_célula == '':
                 dado_célula = None
 
-            if re.search('\d{2}/\d{2}/\d{4}', str(dado_célula)) != None: # identifica campos de texto, mas que contém data dd/mm/aaaa
-                                                                         # e coloca no formado de data para o banco aaaa-mm-dd
+            # datas já vêm como datetime nativo do openpyxl quando a célula
+            # está formatada como data no Excel; strings soltas no formato
+            # dd/mm/aaaa (ex: coladas de outro sistema) ainda são convertidas
+            if isinstance(dado_célula, datetime.datetime):
+                dado_célula = dado_célula.date()
+            elif re.search(r'\d{2}/\d{2}/\d{4}', str(dado_célula)) is not None:
                 dado_célula = datetime.datetime.strptime(str(dado_célula), '%d/%m/%Y').date()
-
-            if tipo_célula == 3:  # identifica células que tem formato de data no excell e coloca como aaaa-mm-dd
-
-                ano_mes_dia = (str(xlrd.xldate.xldate_as_datetime(dado_célula, 0))[0:10])
-                dia_mes_ano = ano_mes_dia[8:10] + '/' + ano_mes_dia[5:7] + '/' + ano_mes_dia[0:4]
-
-                dado_célula = datetime.datetime.strptime(str(dia_mes_ano), '%d/%m/%Y').date()
 
             linha.append(dado_célula)
 
         # verifica se o registro a ser inserido já não existe no banco, identificado por processo, data pagamento e tipo pagamento
-        #bolsista_pagamento = PagamentosPDCTR.query.filter_by(processo = linha[0], data_pagamento = linha[21], tipo_pagamento = linha[22]).first()
         bolsista_pagamento = db.session.query(PagamentosPDCTR)\
                                        .filter_by(processo = linha[0], data_pagamento = linha[22], tipo_pagamento = linha[23])\
                                        .first()
@@ -474,13 +481,25 @@ def cargaPDCTR(entrada):
         if mae_atual == None:
 
             print('*** Novo processo mãe inserido: ',mae.proc_mae,' ***')
+            # Bug real: faltavam 4 argumentos obrigatórios de Processo_Mae.__init__
+            # (id_chamada, pago_capital, pago_custeio, pago_bolsas) — quebrava com
+            # TypeError sempre que um processo mãe novo (ainda não cadastrado)
+            # aparecia na planilha de pagamentos. cargaPDCTR não tem vínculo com
+            # chamada nem valores agregados de capital/custeio/bolsas aqui (isso só
+            # existe na carga via DW, mais abaixo neste arquivo) — mesmo padrão já
+            # usado para processo mãe sem esses dados em
+            # acordos/services.py:incluir_processo_mae_manual.
             mae_gravar = Processo_Mae(cod_programa  = mae.cod_programa,
                                       nome_chamada  = mae.nome_chamada,
                                       proc_mae      = mae.proc_mae,
                                       inic_mae      = mae.inic_mae,
                                       term_mae      = mae.term_mae,
                                       coordenador   = mae.coordenador,
-                                      situ_mae      = mae.situ_mae)
+                                      situ_mae      = mae.situ_mae,
+                                      id_chamada    = None,
+                                      pago_capital  = 0,
+                                      pago_custeio  = 0,
+                                      pago_bolsas   = 0)
             db.session.add(mae_gravar)
             db.session.commit()
 

@@ -27,3 +27,6 @@
 /project/static/convenios.csv
 /project/static/convenio.pdf
 /project/static/ted.csv
+/*.xlsx
+/carga_log.txt
+/carga_pdctr_output*.log
