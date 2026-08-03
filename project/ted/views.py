@@ -20,7 +20,7 @@ from flask_login import current_user, login_required
 
 from project.ted import services
 from project.ted.forms import ExecucaoInternaForm, VinculoProgramaCNPqForm, VinculoInstrumentoForm
-from project.models import TED_PlanoAcao
+from project.models import TED_PlanoAcao, Sistema
 
 
 ted = Blueprint('ted', __name__, template_folder='templates/ted')
@@ -186,3 +186,29 @@ def vincula_instrumento(id_plano_acao):
         return redirect(url_for('ted.gestao'))
 
     return render_template('vincula_instrumento.html', form=form, plano=plano)
+
+
+@ted.route('/bi_ted')
+def bi_ted():
+    """
+    +---------------------------------------------------------------------------------------+
+    |Apresenta a visão consolidada de BI de TED: valor por órgão de origem, quantidade por  |
+    |situação, percentual de curadoria (vínculo a Programa CNPq) e evolução temporal.        |
+    |                                                                                         |
+    |Rota pública, sem login — controlada apenas pelo interruptor de sistema                |
+    |Sistema.bi_ted (ligado/desligado só pelo admin master).                                 |
+    +---------------------------------------------------------------------------------------+
+    """
+    if Sistema.query.first().bi_ted != 1:
+        return render_template('bi_indisponivel.html', modulo='TED')
+
+    filtros = {
+        'orgao': request.args.get('orgao') or None,
+        'situacao': request.args.get('situacao') or None,
+        'ano': request.args.get('ano') or None,
+        'programa_cnpq': request.args.get('programa_cnpq') or None,
+    }
+
+    dados = services.bi_ted(filtros)
+
+    return render_template('bi_ted.html', filtros=filtros, **dados)

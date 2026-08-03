@@ -10,6 +10,7 @@
 """
 
 import datetime as dt
+import locale
 import math
 import os.path
 
@@ -409,3 +410,81 @@ def exportar_teds_csv(filtros=None):
         linhas,
     )
     return caminho_csv
+
+
+def bi_ted(filtros=None):
+    """
+    Monta os indicadores da tela de BI de TED (Etapa 3 do roadmap de BI):
+    valor total por órgão de origem (no lugar de UF — TED não tem UF
+    associada), quantidade por situação, percentual de curadoria (TEDs
+    já vinculados a um Programa CNPq) e evolução temporal por ano.
+
+    Reaproveita listar_teds(filtros) — mesma consulta/filtragem/curadoria
+    já usada na tela de Gestão — e agrega em Python, em vez de duplicar
+    a lógica de join numa query nova.
+    """
+    itens = listar_teds(filtros)
+
+    valor_total = 0.0
+    vinculados = 0
+
+    por_orgao = {}
+    por_situacao = {}
+    por_ano = {}
+
+    for item in itens:
+        plano = item['plano']
+        valor = (plano.valor_beneficiario_especifico or 0) + (plano.valor_chamamento_publico or 0)
+        valor_total += valor
+
+        if item['programa_cnpq_nome']:
+            vinculados += 1
+
+        orgao = item['programa'].unidade_descentralizadora if item['programa'] else 'Não informado'
+        item_orgao = por_orgao.setdefault(orgao, {'qtd': 0, 'valor': 0.0})
+        item_orgao['qtd'] += 1
+        item_orgao['valor'] += valor
+
+        situacao = plano.situacao_plano or 'Não informado'
+        item_situacao = por_situacao.setdefault(situacao, {'qtd': 0, 'valor': 0.0})
+        item_situacao['qtd'] += 1
+        item_situacao['valor'] += valor
+
+        ano = plano.ano or 'Não informado'
+        item_ano = por_ano.setdefault(ano, {'qtd': 0, 'valor': 0.0})
+        item_ano['qtd'] += 1
+        item_ano['valor'] += valor
+
+    total = len(itens)
+    percentual_curadoria = round(100 * vinculados / total) if total else 0
+
+    orgaos = sorted(
+        [{'orgao': nome, 'qtd': i['qtd'], 'valor': i['valor']} for nome, i in por_orgao.items()],
+        key=lambda x: x['valor'], reverse=True,
+    )
+    situacoes = sorted(
+        [{'situacao': nome, 'qtd': i['qtd'], 'valor': i['valor']} for nome, i in por_situacao.items()],
+        key=lambda x: x['qtd'], reverse=True,
+    )
+    evolucao = sorted(
+        [{'ano': ano, 'qtd': i['qtd'], 'valor': i['valor']} for ano, i in por_ano.items()],
+        key=lambda x: x['ano'],
+    )
+
+    # opcoes_filtro() usa as chaves 'orgaos'/'situacoes'/'anos' pras opções de
+    # <select> (listas de strings) — nomes diferentes das chaves acima
+    # (dados agregados pros gráficos), pra não colidir na hora de montar o retorno
+    opcoes = opcoes_filtro()
+
+    return {
+        'valor_total': locale.currency(valor_total, symbol=False, grouping=True),
+        'quantidade_total': total,
+        'percentual_curadoria': percentual_curadoria,
+        'vinculados': vinculados,
+        'orgaos': orgaos,
+        'situacoes': situacoes,
+        'evolucao': evolucao,
+        'opcoes_orgaos': opcoes['orgaos'],
+        'opcoes_situacoes': opcoes['situacoes'],
+        'opcoes_anos': opcoes['anos'],
+    }

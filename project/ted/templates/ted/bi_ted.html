@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+
+  <div class="card border-primary mb-3">
+    <div class="card-header">
+      <h3>BI TED</h3>
+      <small class="text-muted">Visão consolidada dos Termos de Execução Descentralizada recebidos pelo CNPq (Etapa 3 do roadmap de BI).</small>
+    </div>
+
+    <div class="card-body">
+
+      <form method="get" class="form-inline mb-4" action="{{ url_for('ted.bi_ted') }}">
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="orgao">Órgão de origem:</label>
+          <select class="form-control" id="orgao" name="orgao">
+            <option value="">Todos</option>
+            {% for o in opcoes_orgaos %}
+              <option value="{{ o }}" {% if filtros.orgao == o %}selected{% endif %}>{{ o }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="situacao">Situação:</label>
+          <select class="form-control" id="situacao" name="situacao">
+            <option value="">Todas</option>
+            {% for s in opcoes_situacoes %}
+              <option value="{{ s }}" {% if filtros.situacao == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="ano">Ano:</label>
+          <select class="form-control" id="ano" name="ano">
+            <option value="">Todos</option>
+            {% for a in opcoes_anos %}
+              <option value="{{ a }}" {% if filtros.ano == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="programa_cnpq">Programa CNPq:</label>
+          <select class="form-control" id="programa_cnpq" name="programa_cnpq">
+            <option value="">Todos</option>
+            <option value="vinculado" {% if filtros.programa_cnpq == 'vinculado' %}selected{% endif %}>Vinculado</option>
+            <option value="pendente" {% if filtros.programa_cnpq == 'pendente' %}selected{% endif %}>Pendente de curadoria</option>
+          </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary mb-2">Filtrar</button>
+        <a href="{{ url_for('ted.bi_ted') }}" class="btn btn-outline-secondary mb-2 ml-2">Limpar</a>
+      </form>
+
+      <!-- KPIs -->
+      <div class="row mb-4">
+        <div class="col-md-4">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Valor total captado</span>
+              <h4>{{ valor_total }}</h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">TEDs (total)</span>
+              <h4>{{ quantidade_total }}</h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Curadoria (vinculados a Programa CNPq)</span>
+              <h4>{{ percentual_curadoria }}% <small class="font-weight-light">({{ vinculados }} de {{ quantidade_total }})</small></h4>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- gráficos -->
+      <div class="row mb-4">
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">TEDs por situação</div>
+            <div class="card-body"><canvas id="chartSituacao"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Valor por órgão de origem</div>
+            <div class="card-body"><canvas id="chartOrgaos"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Evolução anual (valor)</div>
+            <div class="card-body"><canvas id="chartEvolucao"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+  const situacoes = {{ situacoes | tojson }};
+  const orgaos = {{ orgaos | tojson }};
+  const evolucao = {{ evolucao | tojson }};
+
+  new Chart(document.getElementById('chartSituacao'), {
+    type: 'doughnut',
+    data: {
+      labels: situacoes.map(s => s.situacao),
+      datasets: [{ data: situacoes.map(s => s.qtd) }],
+    },
+  });
+
+  new Chart(document.getElementById('chartOrgaos'), {
+    type: 'bar',
+    data: {
+      labels: orgaos.map(o => o.orgao),
+      datasets: [{ label: 'Valor (R$)', data: orgaos.map(o => o.valor) }],
+    },
+    options: { indexAxis: 'y' },
+  });
+
+  new Chart(document.getElementById('chartEvolucao'), {
+    type: 'line',
+    data: {
+      labels: evolucao.map(e => e.ano),
+      datasets: [{ label: 'Valor (R$)', data: evolucao.map(e => e.valor) }],
+    },
+  });
+</script>
+{% endblock %}

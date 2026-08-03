@@ -102,11 +102,19 @@
             </div>
           </li>
 
-          {% if current_user.is_authenticated and current_user.trab_ted == 1 %}
-            <li class="nav-item active">
-              <a class="nav-link" href="{{url_for('ted.gestao')}}">TED</a>
-            </li>
-          {% endif %}
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown3" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+              TED
+            </a>
+            <div class="dropdown-menu" aria-labelledby="navbarDropdown3">
+              {% if current_user.is_authenticated and current_user.trab_ted == 1 %}
+                <a class="dropdown-item" href="{{url_for('ted.gestao')}}">Gestão</a>
+              {% endif %}
+              {% if sistema_bi and sistema_bi.bi_ted == 1 %}
+                <a class="dropdown-item" href="{{url_for('ted.bi_ted')}}">BI TED</a>
+              {% endif %}
+            </div>
+          </li>
 
           {% if current_user.is_authenticated and current_user.trab_instru == 1 %}
             <li class="nav-item dropdown">

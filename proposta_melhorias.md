@@ -131,6 +131,45 @@ ou de decisões de infraestrutura do CNPq:
 
 ---
 
+## 8. Infraestrutura de testes — proteção contra efeito colateral em dado persistente/singleton (pendente)
+
+Já ocorreram vários casos de testes que escrevem em dado **persistente e
+compartilhado** entre execuções (a linha única de `Sistema`, contas de usuário
+reais no banco de dev, e — achado novo durante o BI de TED — tabelas de
+conteúdo inteiras) e não restauram o estado original ao terminar:
+
+- A linha única de `Sistema` e contas reais (ex: `igorc@cnpq.br`) já tiveram
+  Gestão/BI desligados e permissões zeradas por um teste de
+  `admin_reg_ver` que fazia POST minimalista deixando todo `BooleanField`
+  desmarcado — corrigido nesta sessão (o teste agora marca explicitamente os
+  campos que não estão sob teste).
+- Achado novo: `services.cargaTED()` faz *delete-and-reload* de verdade nas 3
+  tabelas espelho de TED (`TED_PlanoAcao`, `TED_Programa`,
+  `TED_TermoExecucao`) — comportamento correto da função, mas dois testes já
+  escritos (`test_carga_ted_mockada_popula_tabelas_espelho` e um teste novo
+  desta sessão, `test_data_ultima_carga_gravada_e_exibida`) chamam essa
+  função de verdade (só a chamada HTTP é mockada) contra o banco de dev
+  persistente. Resultado: toda vez que a suíte roda, os 301 TEDs reais
+  (carregados da API do TransfereGov) são substituídos pelos dados de
+  mock/vazios dos testes — precisei rodar `cargaTED()` de novo manualmente
+  pra repovoar dado real antes de revisar o BI de TED.
+
+Proposta (já cogitada antes): um fixture de teste que tira um "snapshot" do
+estado de `Sistema` (e, se fizer sentido, de contas de usuário sensíveis e/ou
+das tabelas de conteúdo que sofrem delete-and-reload, como as de TED) antes
+de qualquer teste que mexa nesses dados, e restaura automaticamente depois —
+independente do teste ter passado ou falhado. Alternativa mais simples só
+para os dados de TED: um banco de teste isolado/efêmero em vez do banco de
+desenvolvimento (mesma direção já apontada no comentário de
+`tests/conftest.py`: "Fase 2+... banco de teste isolado/efêmero em vez do
+banco de desenvolvimento").
+
+Não é bloqueante para nenhum commit em andamento — é uma melhoria de
+infraestrutura de teste, a ser tratada como tarefa própria quando houver
+espaço.
+
+---
+
 ## Como sugiro seguirmos
 
 **Prioridade atual (janela política em aberto):** avançar com o item 6.5 (BI sobre
