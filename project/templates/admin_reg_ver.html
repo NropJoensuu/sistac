@@ -51,10 +51,28 @@
       {{ render_field(form.funcionalidade_instru,class="form-control", obr=False) }}
     </div>
     <div class="form-group col-4">
+      {{ render_field(form.funcionalidade_ted,class="form-control", obr=False) }}
+    </div>
+    <div class="form-group col-4">
       {{ render_field(form.carga_auto,class="form-control", obr=False) }}
     </div>
     <div class="col-8">
-      <p><strong>Ao habilitar qualquer das funcionalidades de Convênios, Acordos ou Instrumentos, deverá ser informado aos admins que ativem também em seus respectivos ambientes.</strong></p>
+      <p><strong>Ao habilitar qualquer das funcionalidades de Convênios, Acordos, TED ou Instrumentos, deverá ser informado aos admins que ativem também em seus respectivos ambientes.</strong></p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="form-group col-4">
+      {{ render_field(form.bi_conv,class="form-control", obr=False) }}
+    </div>
+    <div class="form-group col-4">
+      {{ render_field(form.bi_acordo,class="form-control", obr=False) }}
+    </div>
+    <div class="form-group col-4">
+      {{ render_field(form.bi_ted,class="form-control", obr=False) }}
+    </div>
+    <div class="col-12">
+      <p><strong>BI é uma tela pública, sem necessidade de login. Desabilitar o BI de um módulo o torna indisponível para qualquer visitante, mesmo com a Gestão daquele módulo habilitada.</strong></p>
     </div>
   </div>
 

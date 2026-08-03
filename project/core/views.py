@@ -47,7 +47,11 @@ def index():
 
     services.agendar_cargas_iniciais()
 
-    return render_template ('index.html',sistema=sistema) 
+    # import local pra evitar import circular entre core e ted
+    from project.ted.services import agendar_carga_ted_diaria
+    agendar_carga_ted_diaria()
+
+    return render_template ('index.html',sistema=sistema)
 
 @core.route('/inicio')
 def inicio():

@@ -45,6 +45,7 @@ from flask import render_template,url_for,flash, redirect,request,Blueprint
 from flask_login import current_user,login_required
 from project.convenios.forms import SEIForm, ProgPrefForm, ListaForm, NDForm, ChamadaConvForm
 from project.convenios import services
+from project.models import Sistema
 
 
 convenios = Blueprint('convenios',__name__,
@@ -393,15 +394,20 @@ def resumo_convenios():
 ## filtro de coordenação (ver docstring de services.bi_convenios)
 
 @convenios.route('/bi_convenios')
-@login_required
 def bi_convenios():
     """
     +---------------------------------------------------------------------------------------+
     |Apresenta a visão consolidada de BI de Convênios: valor em carteira, taxa de           |
     |desembolso, distribuição por programa/UF/situação, evolução temporal,                  |
     |vigência a vencer e ranking de parceiros/FAPs.                                          |
+    |                                                                                         |
+    |Rota pública, sem login — controlada apenas pelo interruptor de sistema                |
+    |Sistema.bi_conv (ligado/desligado só pelo admin master).                                |
     +---------------------------------------------------------------------------------------+
     """
+    if Sistema.query.first().bi_conv != 1:
+        return render_template('bi_indisponivel.html', modulo='Convênios')
+
     filtros = {
         'programa': request.args.get('programa') or None,
         'uf': request.args.get('uf') or None,

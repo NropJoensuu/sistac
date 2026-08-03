@@ -86,3 +86,14 @@ app.register_blueprint(convenios,url_prefix='/convenios')
 app.register_blueprint(instrumentos,url_prefix='/instrumentos')
 
 app.register_blueprint(ted,url_prefix='/ted')
+
+
+############################################
+## injeta os interruptores de BI em todo template (base.html usa pra
+## montar o menu "BI", visível a qualquer visitante, logado ou não)
+
+from project.models import Sistema
+
+@app.context_processor
+def inject_bi_flags():
+    return dict(sistema_bi=Sistema.query.first())

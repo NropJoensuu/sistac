@@ -15,7 +15,7 @@
     * Vincula um TED a um Convênio ou Acordo existente: vincula_instrumento
 """
 
-from flask import render_template, url_for, flash, redirect, request, Blueprint
+from flask import render_template, url_for, flash, redirect, request, Blueprint, abort
 from flask_login import current_user, login_required
 
 from project.ted import services
@@ -36,6 +36,9 @@ def gestao():
     |Convênio/Acordo vinculado).                                                             |
     +---------------------------------------------------------------------------------------+
     """
+    if current_user.trab_ted != 1:
+        abort(403)
+
     filtros = {
         'orgao': request.args.get('orgao') or None,
         'situacao': request.args.get('situacao') or None,
@@ -43,11 +46,16 @@ def gestao():
         'programa_cnpq': request.args.get('programa_cnpq') or None,
         'busca': request.args.get('busca') or None,
     }
+    page = request.args.get('page', 1, type=int)
+    sort = request.args.get('sort') or None
+    direcao = request.args.get('dir') or 'asc'
 
-    teds = services.listar_teds(filtros)
+    teds, paginacao = services.listar_teds(filtros, page=page, sort=sort, direcao=direcao)
     opcoes = services.opcoes_filtro()
+    ultima_carga = services.dados_ultima_carga_ted()
 
-    return render_template('gestao.html', teds=teds, filtros=filtros, **opcoes)
+    return render_template('gestao.html', teds=teds, filtros=filtros, paginacao=paginacao,
+                            sort=sort, direcao=direcao, ultima_carga=ultima_carga, **opcoes)
 
 
 @ted.route('/carrega', methods=['GET', 'POST'])
@@ -69,6 +77,30 @@ def carrega():
         flash(f'Falha ao carregar dados do TransfereGov: {e}', 'perigo')
 
     return redirect(url_for('ted.gestao'))
+
+
+@ted.route('/exporta_csv')
+@login_required
+def exporta_csv():
+    """
+    +---------------------------------------------------------------------------------------+
+    |Gera o CSV com o conjunto de TEDs do filtro atual (mesmo padrão de download já usado    |
+    |em Convênios/Acordos) e redireciona pro arquivo estático gerado.                        |
+    +---------------------------------------------------------------------------------------+
+    """
+    if current_user.trab_ted != 1:
+        abort(403)
+
+    filtros = {
+        'orgao': request.args.get('orgao') or None,
+        'situacao': request.args.get('situacao') or None,
+        'ano': request.args.get('ano') or None,
+        'programa_cnpq': request.args.get('programa_cnpq') or None,
+        'busca': request.args.get('busca') or None,
+    }
+    services.exportar_teds_csv(filtros)
+
+    return redirect(url_for('static', filename='ted.csv'))
 
 
 @ted.route('/<int:id_plano_acao>/registra_execucao', methods=['GET', 'POST'])

@@ -100,6 +100,7 @@ def registrar_usuario(email, username, password, coord, despacha0, despacha, des
     trab_conv = db.session.query(Sistema.funcionalidade_conv).first()
     trab_acordo = db.session.query(Sistema.funcionalidade_acordo).first()
     trab_instru = db.session.query(Sistema.funcionalidade_instru).first()
+    trab_ted = db.session.query(Sistema.funcionalidade_ted).first()
 
     user = User(
         email=email,
@@ -117,6 +118,7 @@ def registrar_usuario(email, username, password, coord, despacha0, despacha, des
         trab_conv=trab_conv[0],
         trab_acordo=trab_acordo[0],
         trab_instru=trab_instru[0],
+        trab_ted=trab_ted[0],
     )
 
     db.session.add(user)
@@ -656,13 +658,16 @@ def dados_config_sistema():
 
 def atualizar_config_sistema(nome_sistema, descritivo, funcionalidade_conv,
                               funcionalidade_acordo, funcionalidade_instru,
-                              cod_inst, carga_auto, usuario_id):
+                              cod_inst, carga_auto, usuario_id,
+                              funcionalidade_ted=0, bi_conv=1, bi_acordo=1, bi_ted=1):
     """
     Atualiza os dados gerais do Sistema, o código da instituição no
     SICONV, e agenda/cancela as cargas automáticas (SICONV e DW)
-    conforme o parâmetro carga_auto. Ao desabilitar uma funcionalidade,
-    remove a permissão correspondente ("trabalha com X") de todos os
-    usuários que a tinham.
+    conforme o parâmetro carga_auto. Ao desabilitar uma funcionalidade
+    de Gestão, remove a permissão correspondente ("trabalha com X") de
+    todos os usuários que a tinham. Os interruptores de BI (bi_conv,
+    bi_acordo, bi_ted) não têm permissão individual por usuário — são
+    só de sistema, controlados apenas pelo admin master.
     """
     users = listar_usuarios()
     sistema = Sistema.query.first()
@@ -675,6 +680,8 @@ def atualizar_config_sistema(nome_sistema, descritivo, funcionalidade_conv,
             user.trab_acordo = 0
         if not funcionalidade_instru:
             user.trab_instru = 0
+        if not funcionalidade_ted:
+            user.trab_ted = 0
 
     db.session.commit()
 
@@ -683,6 +690,10 @@ def atualizar_config_sistema(nome_sistema, descritivo, funcionalidade_conv,
     sistema.funcionalidade_conv = '1' if funcionalidade_conv else '0'
     sistema.funcionalidade_acordo = '1' if funcionalidade_acordo else '0'
     sistema.funcionalidade_instru = '1' if funcionalidade_instru else '0'
+    sistema.funcionalidade_ted = '1' if funcionalidade_ted else '0'
+    sistema.bi_conv = '1' if bi_conv else '0'
+    sistema.bi_acordo = '1' if bi_acordo else '0'
+    sistema.bi_ted = '1' if bi_ted else '0'
     inst.cod_inst = cod_inst
 
     id_1 = 'carga_siconv'
@@ -855,7 +866,8 @@ def usuario_visivel_para(admin, user):
 
 
 def atualizar_usuario_admin(user_id, coord, despacha0, despacha, despacha2, ativo,
-                             role, cargo_func, trab_conv, trab_acordo, trab_instru, admin_atual):
+                             role, cargo_func, trab_conv, trab_acordo, trab_instru, admin_atual,
+                             trab_ted=0):
     """
     Atualiza os dados administrativos de um usuário (feito pelo admin).
 
@@ -896,6 +908,8 @@ def atualizar_usuario_admin(user_id, coord, despacha0, despacha, despacha2, ativ
         user.trab_acordo = int(trab_acordo)
     if sistema.funcionalidade_instru == 1:
         user.trab_instru = int(trab_instru)
+    if sistema.funcionalidade_ted == 1:
+        user.trab_ted = int(trab_ted)
 
     db.session.commit()
 

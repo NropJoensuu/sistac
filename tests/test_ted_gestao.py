@@ -29,10 +29,16 @@ def _usuario(app, email, username):
                 email=email, username=username,
                 plaintext_password='senha123', coord='DPI', role='user',
                 ativo=1, sversion=1, cargo_func='teste',
-                trab_conv=1, trab_acordo=1, trab_instru=1,
+                trab_conv=1, trab_acordo=1, trab_instru=1, trab_ted=1,
                 despacha0=0, despacha=0, despacha2=0,
             )
             db.session.add(user)
+            db.session.commit()
+        elif user.trab_ted != 1:
+            # usuário criado em execução anterior da suíte, antes de
+            # trab_ted existir (banco de dev persistente) — sem isso,
+            # o guard novo em /ted/gestao devolveria 403.
+            user.trab_ted = 1
             db.session.commit()
         return user.id
 

@@ -111,6 +111,7 @@ class AdminForm(FlaskForm):
     trab_conv    = BooleanField('Usuário trabalha com convênios?')
     trab_acordo  = BooleanField('Usuário trabalha com acordos e encomendas?')
     trab_instru  = BooleanField('Usuário trabalha com instrumentos?')
+    trab_ted     = BooleanField('Usuário trabalha com TED?')
     submit       = SubmitField('Atualizar')
 
     def __init__(self, *args, **kwargs):
@@ -163,9 +164,13 @@ class VerForm(FlaskForm):
     cod_inst              = StringField('Cód. da Instituição: ')
     nome_sistema          = StringField('Nome do sistema: ')
     descritivo            = TextAreaField('Descritivo: ')
-    funcionalidade_conv   = BooleanField('Habilitar funcionalidade convênios?')
-    funcionalidade_acordo = BooleanField('Habilitar funcionalidade acordos?')
+    funcionalidade_conv   = BooleanField('Habilitar Gestão de convênios?')
+    funcionalidade_acordo = BooleanField('Habilitar Gestão de acordos?')
     funcionalidade_instru = BooleanField('Habilitar funcionalidade instrumentos?')
+    funcionalidade_ted    = BooleanField('Habilitar Gestão de TED?')
+    bi_conv               = BooleanField('Habilitar BI de convênios?')
+    bi_acordo             = BooleanField('Habilitar BI de acordos?')
+    bi_ted                = BooleanField('Habilitar BI de TED?')
     carga_auto            = BooleanField('Habilitar carga automática?')
     submit                = SubmitField('Registrar')
 

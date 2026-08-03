@@ -69,7 +69,7 @@ from flask_login import current_user,login_required
 from sqlalchemy import func, distinct, not_, or_, cast, String, literal
 from sqlalchemy.sql import label
 from project import db
-from project.models import Acordo, RefCargaPDCTR, PagamentosPDCTR, Processo_Mae, Bolsa, User, Demanda,\
+from project.models import Acordo, RefCargaPDCTR, PagamentosPDCTR, Processo_Mae, Bolsa, User, Demanda, Sistema,\
                            Chamadas, Programa_CNPq, Acordo_ProcMae, Processo_Filho, Coords, grupo_programa_cnpq,\
                            capital_custeio,DadosSEI, chamadas_cnpq, chamadas_cnpq_acordos, financeiro_acordo, RefSICONV
 from project.acordos.forms import AcordoForm, Programa_CNPqForm, func_ProcMae_Acordo, ListaForm, ArquivoForm,\
@@ -826,7 +826,6 @@ def resumo_acordos():
 ## sem filtro de coordenação (ver docstring de services.bi_acordos)
 
 @acordos.route('/bi_acordos')
-@login_required
 def bi_acordos():
     """
     +---------------------------------------------------------------------------------------+
@@ -834,8 +833,14 @@ def bi_acordos():
     |Programa CNPq, evolução temporal e vigência a vencer. Indicadores que dependem da       |
     |cadeia processo mãe/filho/chamada/bolsista/pagamento (DW Oracle) ficam sinalizados       |
     |como pendência na própria tela.                                                          |
+    |                                                                                         |
+    |Rota pública, sem login — controlada apenas pelo interruptor de sistema                |
+    |Sistema.bi_acordo (ligado/desligado só pelo admin master).                              |
     +---------------------------------------------------------------------------------------+
     """
+    if Sistema.query.first().bi_acordo != 1:
+        return render_template('bi_indisponivel.html', modulo='Acordos')
+
     filtros = {
         'programa': request.args.get('programa') or None,
         'situacao': request.args.get('situacao') or None,

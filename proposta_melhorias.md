@@ -105,7 +105,22 @@ Itens que não se resolvem só editando `sistac` — dependem de configuração 
 ou de decisões de infraestrutura do CNPq:
 
 - **Logo do CNPq não aparecendo**: ainda pendente de diagnóstico (precisa confirmar se
-  `/static/coop_nac.png` carrega direto pela URL).
+  `/static/coop_nac.png` carrega direto pela URL) — mas há uma pista forte, ver item
+  abaixo (`static_folder` fixo em caminho de Docker): pode ser a mesma causa.
+- **`static_folder` fixo em caminho de Docker — quebra downloads de CSV (e possivelmente
+  o logo) fora do container**: `project/__init__.py` cria o Flask com
+  `static_folder='/app/project/static'` (caminho fixo, assumindo o container Docker de
+  produção). Nesse Codespace (onde o projeto vive em `/workspaces/sistac`), esse caminho
+  não existe — então qualquer link `/static/arquivo` (`convenios.csv`,
+  `programas_conv.csv`, e agora também `ted.csv`, adicionado na frente de melhorias da
+  Gestão de TED) responde 404, mesmo que o arquivo tenha sido gerado corretamente em
+  `project/static/` no disco real. Confirmado testando `convenios.csv` (já existia,
+  mesmo problema) e `ted.csv` (novo). Provavelmente é a mesma causa do item do logo
+  acima. Correção sugerida: usar um caminho relativo/portável (ex:
+  `os.path.join(os.path.dirname(__file__), 'static')`, mesmo padrão já usado em
+  `cria_csv` via `app.root_path`) em vez do caminho fixo do Docker — mas requer
+  confirmar com o time de infra se a produção depende desse caminho fixo por algum
+  outro motivo antes de mudar.
 - **Mapa de Convênios "Access blocked"**: política de uso de tiles do OpenStreetMap
   bloqueando por falta de `Referer` correto — comum em ambientes de preview/proxy como
   o do Codespace. Pode não se reproduzir em produção.

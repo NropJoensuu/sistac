@@ -531,6 +531,21 @@ class TED_Vinculo_Instrumento(db.Model):
     def __repr__(self):
         return f"{self.id_plano_acao};{self.tipo_instrumento};{self.nr_convenio or self.id_acordo}"
 
+
+class TED_Carga_Status(db.Model):
+    """Linha única com a data/hora da última carga de TED bem-sucedida (mesmo padrão de RefSICONV.data_ref)."""
+
+    __tablename__ = 'ted_carga_status'
+
+    id                = db.Column(db.Integer, primary_key=True)
+    data_ultima_carga = db.Column(db.DateTime)
+
+    def __init__(self, data_ultima_carga):
+        self.data_ultima_carga = data_ultima_carga
+
+    def __repr__(self):
+        return f"{self.data_ultima_carga}"
+
 # dados dos vários acordos
 class Acordo(db.Model):
 
@@ -1377,13 +1392,14 @@ class User(db.Model, UserMixin):
     trab_acordo                = db.Column(db.Integer)
     despacha0                  = db.Column(db.Integer)
     trab_instru                = db.Column(db.Integer)
+    trab_ted                   = db.Column(db.Integer)
 
 
     posts = db.relationship ('Demanda',backref='author',lazy=True)
     desp  = db.relationship ('Despacho',backref='author',lazy=True)
 
     def __init__(self,email,username,plaintext_password,despacha,coord,despacha2,ativo,sversion,cargo_func,\
-                 trab_conv,trab_acordo,despacha0,trab_instru,email_confirmation_sent_on=None,role='user'):
+                 trab_conv,trab_acordo,despacha0,trab_instru,email_confirmation_sent_on=None,role='user',trab_ted=0):
 
         self.email                      = email
         self.username                   = username
@@ -1406,6 +1422,7 @@ class User(db.Model, UserMixin):
         self.trab_conv                  = trab_conv
         self.despacha0                  = despacha0
         self.trab_instru                = trab_instru
+        self.trab_ted                   = trab_ted
 
     def check_password (self,plaintext_password):
 
@@ -1476,9 +1493,14 @@ class Sistema(db.Model):
     funcionalidade_conv   = db.Column(db.Integer,default=1)
     funcionalidade_acordo = db.Column(db.Integer,default=1)
     funcionalidade_instru = db.Column(db.Integer,default=1)
+    funcionalidade_ted    = db.Column(db.Integer,default=0)
     carga_auto            = db.Column(db.Integer,default=0)
+    bi_conv               = db.Column(db.Integer,default=1)
+    bi_acordo             = db.Column(db.Integer,default=1)
+    bi_ted                = db.Column(db.Integer,default=1)
 
-    def __init__(self, nome_sistema, descritivo,funcionalidade_conv,funcionalidade_acordo,funcionalidade_instru,carga_auto):
+    def __init__(self, nome_sistema, descritivo,funcionalidade_conv,funcionalidade_acordo,funcionalidade_instru,carga_auto,\
+                 funcionalidade_ted=0,bi_conv=1,bi_acordo=1,bi_ted=1):
 
         self.nome_sistema          = nome_sistema
         self.descritivo            = descritivo
@@ -1486,6 +1508,10 @@ class Sistema(db.Model):
         self.funcionalidade_acordo = funcionalidade_acordo
         self.funcionalidade_instru = funcionalidade_instru
         self.carga_auto            = carga_auto
+        self.funcionalidade_ted    = funcionalidade_ted
+        self.bi_conv               = bi_conv
+        self.bi_acordo             = bi_acordo
+        self.bi_ted                = bi_ted
 
     def __repr__(self):
 

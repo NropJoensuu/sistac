@@ -382,6 +382,10 @@ def admin_reg_ver():
                 cod_inst=form.cod_inst.data,
                 carga_auto=form.carga_auto.data,
                 usuario_id=current_user.id,
+                funcionalidade_ted=form.funcionalidade_ted.data,
+                bi_conv=form.bi_conv.data,
+                bi_acordo=form.bi_acordo.data,
+                bi_ted=form.bi_ted.data,
             )
 
             flash('Dados gerais do sistema atualizados!','sucesso')
@@ -398,6 +402,10 @@ def admin_reg_ver():
             form.funcionalidade_instru.data = sistema.funcionalidade_instru
             form.cod_inst.data              = inst.cod_inst
             form.carga_auto.data            = sistema.carga_auto
+            form.funcionalidade_ted.data    = sistema.funcionalidade_ted
+            form.bi_conv.data               = sistema.bi_conv
+            form.bi_acordo.data             = sistema.bi_acordo
+            form.bi_ted.data                = sistema.bi_ted
 
         return render_template('admin_reg_ver.html', title='Update', form=form)
 
@@ -543,6 +551,7 @@ def admin_update_user(user_id):
                 trab_acordo=form.trab_acordo.data,
                 trab_instru=form.trab_instru.data,
                 admin_atual=current_user,
+                trab_ted=form.trab_ted.data,
             )
 
             if erro:
@@ -566,6 +575,7 @@ def admin_update_user(user_id):
             form.trab_conv.data   = user.trab_conv
             form.trab_acordo.data = user.trab_acordo
             form.trab_instru.data = user.trab_instru
+            form.trab_ted.data    = user.trab_ted
 
         return render_template('admin_update_user.html', title='Update', name=user.username,
                                form=form, sistema=services.dados_sistema())

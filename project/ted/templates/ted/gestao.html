@@ -2,6 +2,13 @@
 {% block content %}
 <div class="container-fluid">
 
+  {% macro link_ordenacao(campo, texto) %}
+    {% set nova_dir = 'desc' if (sort == campo and direcao == 'asc') else 'asc' %}
+    {% set args = request.args.to_dict() %}
+    {% set _ = args.update({'sort': campo, 'dir': nova_dir, 'page': 1}) %}
+    <a href="{{ url_for('ted.gestao', **args) }}" class="text-white">{{ texto }}{% if sort == campo %} {{ '▲' if direcao == 'asc' else '▼' }}{% endif %}</a>
+  {% endmacro %}
+
   <div class="card border-primary mb-3">
     <div class="card-header">
       <h3>Gestão de TED</h3>
@@ -11,10 +18,13 @@
     <div class="card-body">
 
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="text-muted" style="font-size:0.9rem">{{ teds | length }} TED(s) na listagem</div>
-        <form method="post" action="{{ url_for('ted.carrega') }}">
-          <button type="submit" class="btn btn-outline-primary btn-sm">Atualizar da API do TransfereGov</button>
-        </form>
+        <div class="text-muted" style="font-size:0.9rem">
+          {{ paginacao.total }} TED(s) na listagem — pág. {{ paginacao.page }} de {{ paginacao.pages }}
+        </div>
+        <div class="text-muted" style="font-size:0.9rem">
+          Dados atualizados em: <strong>{{ ultima_carga.strftime('%d/%m/%Y %H:%M') if ultima_carga else 'nunca' }}</strong>
+          <a href="{{ url_for('ted.exporta_csv', **request.args.to_dict()) }}" class="btn btn-outline-primary btn-sm ml-2">Download do CSV</a>
+        </div>
       </div>
 
       <form method="get" class="form-inline mb-4" action="{{ url_for('ted.gestao') }}">
@@ -65,11 +75,12 @@
         <table class="table table-striped table-sm">
           <thead>
             <tr>
-              <th>TED / Plano de ação</th>
-              <th>Órgão de origem</th>
-              <th>Situação</th>
-              <th class="text-right">Valor</th>
-              <th>Vigência</th>
+              <th>{{ link_ordenacao('ted', 'TED / Plano de ação') }}</th>
+              <th>{{ link_ordenacao('orgao', 'Órgão de origem') }}</th>
+              <th>{{ link_ordenacao('situacao', 'Situação') }}</th>
+              <th class="text-right">{{ link_ordenacao('valor', 'Valor') }}</th>
+              <th>{{ link_ordenacao('vigencia', 'Vigência') }}</th>
+              <th>Coordenação do CNPq</th>
               <th>Programa CNPq</th>
               <th>SEI / execução (CNPq)</th>
               <th>Convênio / Acordo</th>
@@ -110,6 +121,15 @@
                   {% endif %}
                 </td>
                 <td>
+                  {% if item.coordenacoes %}
+                    {% for coord in item.coordenacoes %}
+                      <span class="badge badge-secondary">{{ coord }}</span>
+                    {% endfor %}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
                   {% if item.programa_cnpq_nome %}
                     <span class="badge badge-success">{{ item.programa_cnpq_nome }}</span>
                   {% else %}
@@ -134,11 +154,34 @@
                 </td>
               </tr>
             {% else %}
-              <tr><td colspan="8" class="text-center text-muted py-4">Nenhum TED carregado ainda — clique em "Atualizar da API do TransfereGov".</td></tr>
+              <tr><td colspan="9" class="text-center text-muted py-4">Nenhum TED carregado ainda — a carga roda automaticamente uma vez por dia, ou pode ser disparada em Carga → Atualizar TED (TransfereGov).</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+
+      {% if paginacao.pages > 1 %}
+        <ul class="pagination justify-content-center">
+          {% set args_base = request.args.to_dict() %}
+
+          <li class="page-item {% if not paginacao.has_prev %}disabled{% endif %}">
+            {% set args = dict(args_base) %}{% set _ = args.update({'page': paginacao.prev_num}) %}
+            <a class="page-link" href="{{ url_for('ted.gestao', **args) }}">Anterior</a>
+          </li>
+
+          {% for num in range(1, paginacao.pages + 1) %}
+            {% set args = dict(args_base) %}{% set _ = args.update({'page': num}) %}
+            <li class="page-item {% if num == paginacao.page %}active{% endif %}">
+              <a class="page-link" href="{{ url_for('ted.gestao', **args) }}">{{ num }}</a>
+            </li>
+          {% endfor %}
+
+          <li class="page-item {% if not paginacao.has_next %}disabled{% endif %}">
+            {% set args = dict(args_base) %}{% set _ = args.update({'page': paginacao.next_num}) %}
+            <a class="page-link" href="{{ url_for('ted.gestao', **args) }}">Próxima</a>
+          </li>
+        </ul>
+      {% endif %}
 
       <div class="alert alert-warning mt-3" role="alert" style="font-size:0.85rem">
         <strong>Pendência conhecida:</strong> quantidade de processos mãe/filho, chamadas vinculadas,

@@ -49,9 +49,15 @@ def _acordo(sei, situ='Vigente-Z', uf='DF', ano_inicio=2024, data_fim=None):
     db.session.commit()
 
 
-def test_bi_acordos_sem_login_redireciona(client):
+def test_bi_acordos_sem_login_responde_200(client):
+    """
+    BI Acordos é rota pública (dois interruptores por módulo — Gestão x
+    BI): não exige mais login, só depende de Sistema.bi_acordo estar
+    habilitado (ver tests/test_users_config_sistema.py para os cenários
+    habilitado/desabilitado).
+    """
     resp = client.get("/acordos/bi_acordos")
-    assert resp.status_code == 302
+    assert resp.status_code == 200
 
 
 def test_bi_acordos_logado_responde_200(client, app):

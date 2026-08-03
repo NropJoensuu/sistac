@@ -10,15 +10,18 @@
 """
 
 import datetime as dt
+import math
+import os.path
 
 import requests
 from sqlalchemy import or_
 
-from project import db
+from project import db, app, sched
 from project.models import (
     TED_Programa, TED_PlanoAcao, TED_TermoExecucao, TED_Execucao_Interna,
-    TED_Vinculo_ProgramaCNPq, TED_Vinculo_Instrumento, Programa_CNPq, Coords,
+    TED_Vinculo_ProgramaCNPq, TED_Vinculo_Instrumento, TED_Carga_Status, Programa_CNPq, Coords,
 )
+from project.convenios.services import cria_csv
 
 API_BASE = 'https://api.transferegov.gestao.gov.br/ted'
 UNIDADE_CNPQ = 'CNPq'
@@ -116,6 +119,13 @@ def cargaTED():
         ))
     db.session.commit()
 
+    status = TED_Carga_Status.query.first()
+    if status:
+        status.data_ultima_carga = dt.datetime.now()
+    else:
+        db.session.add(TED_Carga_Status(data_ultima_carga=dt.datetime.now()))
+    db.session.commit()
+
     return {
         'programas': len(programas),
         'planos': len(planos),
@@ -123,12 +133,71 @@ def cargaTED():
     }
 
 
-def listar_teds(filtros=None):
+def agendar_carga_ted_diaria():
+    """
+    Agenda a carga de TED (API do TransfereGov) uma vez por dia, de
+    forma incondicional — ao contrário de agendar_cargas_iniciais()
+    (SICONV/DW, em project/core/services.py), que só agenda se
+    Sistema.carga_auto estiver ligado, a carga de TED não depende desse
+    interruptor (pedido explícito de Igor: a atualização deve rodar
+    automaticamente todo dia, sem depender de configuração). Idempotente
+    via sched.get_job(), mesmo padrão de agendar_cargas_iniciais().
+    """
+    id_job = 'carga_ted_diaria'
+
+    try:
+        job_existente = sched.get_job(id_job)
+        executa = not job_existente
+    except Exception:
+        executa = True
+
+    if executa:
+        hora, minuto = 6, 0
+        print(f'*** Agendamento inicial {id_job}, rodando todo dia, às {hora}:{minuto:02d} ***')
+        try:
+            sched.add_job(trigger='cron', id=id_job, func=cargaTED, hour=hora, minute=minuto,
+                           misfire_grace_time=3600, coalesce=True)
+            sched.start()
+        except Exception:
+            sched.reschedule_job(id_job, trigger='cron', hour=hora, minute=minuto)
+
+
+def dados_ultima_carga_ted():
+    """Retorna a data/hora da última carga de TED bem-sucedida, ou None se nunca rodou."""
+    status = TED_Carga_Status.query.first()
+    return status.data_ultima_carga if status else None
+
+
+# campo de filtro/exibição -> função que extrai a chave de ordenação de um item de listar_teds()
+_CHAVES_ORDENACAO = {
+    'ted': lambda item: (item['plano'].numero_ted or '', item['plano'].id),
+    'orgao': lambda item: (item['programa'].unidade_descentralizadora if item['programa'] else ''),
+    'situacao': lambda item: (item['plano'].situacao_plano or ''),
+    'valor': lambda item: (item['plano'].valor_beneficiario_especifico or 0) + (item['plano'].valor_chamamento_publico or 0),
+    'vigencia': lambda item: (item['plano'].vigencia_inicio or dt.date.min),
+}
+
+
+def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
     """
     Monta a listagem da tela de gestão: TED_PlanoAcao + TED_Programa +
     TED_TermoExecucao (situação do termo) + estado de curadoria
     (Programa CNPq vinculado? execução interna registrada? instrumento
-    vinculado?), com filtros opcionais.
+    vinculado? coordenação(ões) do CNPq envolvida(s)?), com filtros
+    opcionais.
+
+    Sem `page` (comportamento padrão, usado por cargaTED/testes e por
+    exportar_teds_csv), retorna a lista completa filtrada — sem
+    paginar. Com `page`, retorna `(pagina, paginacao)`, onde `paginacao`
+    é um dict com os campos que o template de paginação precisa (mesmo
+    espírito do Pagination do Flask-SQLAlchemy, mas calculado em Python:
+    o filtro de programa_cnpq vinculado/pendente já é feito em Python
+    hoje, sobre a lista inteira, então paginar no banco antes dele
+    devolveria páginas com contagem errada).
+
+    `sort` (um dos campos de _CHAVES_ORDENACAO) e `direcao` ('asc'/'desc')
+    reordenam o resultado; sem `sort`, mantém a ordem padrão (ano desc,
+    já aplicada na consulta).
     """
     filtros = filtros or {}
 
@@ -185,17 +254,36 @@ def listar_teds(filtros=None):
             programa_cnpq_nome = pc.SIGLA_PROGRAMA if pc else None
 
         instrumento = instrumentos_vinculados.get(plano.id)
+        execucoes = execucoes_por_plano.get(plano.id, [])
+        coordenacoes = sorted({e.coordenacao for e in execucoes if e.coordenacao})
 
         resultado.append({
             'plano': plano,
             'programa': programa,
             'situacao_termo': situacoes_termo.get(plano.id),
             'programa_cnpq_nome': programa_cnpq_nome,
-            'execucoes': execucoes_por_plano.get(plano.id, []),
+            'execucoes': execucoes,
+            'coordenacoes': coordenacoes,
             'instrumento': instrumento,
         })
 
-    return resultado
+    if sort in _CHAVES_ORDENACAO:
+        resultado.sort(key=_CHAVES_ORDENACAO[sort], reverse=(direcao == 'desc'))
+
+    if page is None:
+        return resultado
+
+    total = len(resultado)
+    pages = max(1, math.ceil(total / per_page))
+    page = max(1, min(page, pages))
+    inicio = (page - 1) * per_page
+
+    paginacao = {
+        'page': page, 'per_page': per_page, 'total': total, 'pages': pages,
+        'has_prev': page > 1, 'has_next': page < pages,
+        'prev_num': page - 1, 'next_num': page + 1,
+    }
+    return resultado[inicio:inicio + per_page], paginacao
 
 
 def opcoes_filtro():
@@ -285,3 +373,39 @@ def vincular_instrumento(id_plano_acao, tipo_instrumento, nr_convenio, id_acordo
             data_vinculo=dt.datetime.now(),
         ))
     db.session.commit()
+
+
+def exportar_teds_csv(filtros=None):
+    """
+    Gera project/static/ted.csv com o conjunto de TEDs que bate no
+    filtro atual (igual ao que aparece na tela, mas sem paginar — o
+    arquivo sai com todas as linhas filtradas, não só a página visível).
+    Mesmo padrão de cria_csv já usado em Convênios/Acordos.
+    """
+    itens = listar_teds(filtros)
+
+    linhas = []
+    for item in itens:
+        plano = item['plano']
+        valor_total = (plano.valor_beneficiario_especifico or 0) + (plano.valor_chamamento_publico or 0)
+        linhas.append([
+            plano.numero_ted or f'Plano {plano.id}',
+            item['programa'].unidade_descentralizadora if item['programa'] else '',
+            plano.situacao_plano or '',
+            item['situacao_termo'] or '',
+            valor_total,
+            plano.vigencia_inicio.strftime('%d/%m/%Y') if plano.vigencia_inicio else '',
+            plano.vigencia_fim.strftime('%d/%m/%Y') if plano.vigencia_fim else '',
+            plano.ano or '',
+            ', '.join(item['coordenacoes']),
+            item['programa_cnpq_nome'] or '',
+        ])
+
+    caminho_csv = os.path.join(app.root_path, 'static', 'ted.csv')
+    cria_csv(
+        caminho_csv,
+        ['TED', 'Órgão de origem', 'Situação do plano', 'Situação do termo', 'Valor total',
+         'Vigência início', 'Vigência fim', 'Ano', 'Coordenação do CNPq', 'Programa CNPq'],
+        linhas,
+    )
+    return caminho_csv

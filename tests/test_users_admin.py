@@ -101,18 +101,53 @@ def test_funcionalidade_acordo_pode_ser_desativada(client, app, usuario_admin_ma
     """
     Regressão do bug: desmarcar 'funcionalidade_acordo' no formulário
     admin_reg_ver deve gravar '0', não '1'.
+
+    O POST inclui os demais BooleanFields marcados (funcionalidade_conv,
+    funcionalidade_instru, funcionalidade_ted, bi_conv, bi_acordo, bi_ted)
+    e só deixa funcionalidade_acordo desmarcado — de propósito: só esse
+    campo está sob teste aqui. Se os outros ficassem desmarcados também,
+    atualizar_config_sistema() faria cascade-remove de trab_conv/
+    trab_instru/trab_ted de TODO usuário do banco de dev (persistente),
+    um efeito colateral bem maior que o testado. Sistema também é
+    restaurado no final pelo mesmo motivo (linha única persistente).
     """
     with app.app_context():
         sistema = Sistema.query.first()
+        original = dict(
+            nome_sistema=sistema.nome_sistema, descritivo=sistema.descritivo,
+            funcionalidade_conv=sistema.funcionalidade_conv,
+            funcionalidade_acordo=sistema.funcionalidade_acordo,
+            funcionalidade_instru=sistema.funcionalidade_instru,
+            funcionalidade_ted=sistema.funcionalidade_ted,
+            bi_conv=sistema.bi_conv, bi_acordo=sistema.bi_acordo, bi_ted=sistema.bi_ted,
+            carga_auto=sistema.carga_auto,
+        )
         sistema.funcionalidade_acordo = '1'
         db.session.commit()
 
-    _login(client, usuario_admin_master)
-    resp = client.post("/admin_reg_ver", data={
-        "ver": "5", "nome_sistema": "SISTAC", "descritivo": "teste", "cod_inst": "123",
-    })
-    assert resp.status_code == 302
+    try:
+        _login(client, usuario_admin_master)
+        resp = client.post("/admin_reg_ver", data={
+            "ver": "5", "nome_sistema": "SISTAC", "descritivo": "teste", "cod_inst": "123",
+            "funcionalidade_conv": "y", "funcionalidade_instru": "y",
+            "funcionalidade_ted": "y", "bi_conv": "y", "bi_acordo": "y", "bi_ted": "y",
+        })
+        assert resp.status_code == 302
 
-    with app.app_context():
-        sistema = Sistema.query.first()
-        assert sistema.funcionalidade_acordo == 0
+        with app.app_context():
+            sistema = Sistema.query.first()
+            assert sistema.funcionalidade_acordo == 0
+    finally:
+        with app.app_context():
+            sistema = Sistema.query.first()
+            sistema.nome_sistema = original['nome_sistema']
+            sistema.descritivo = original['descritivo']
+            sistema.funcionalidade_conv = original['funcionalidade_conv']
+            sistema.funcionalidade_acordo = original['funcionalidade_acordo']
+            sistema.funcionalidade_instru = original['funcionalidade_instru']
+            sistema.funcionalidade_ted = original['funcionalidade_ted']
+            sistema.bi_conv = original['bi_conv']
+            sistema.bi_acordo = original['bi_acordo']
+            sistema.bi_ted = original['bi_ted']
+            sistema.carga_auto = original['carga_auto']
+            db.session.commit()

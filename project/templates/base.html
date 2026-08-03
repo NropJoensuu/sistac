@@ -62,44 +62,47 @@
             <a class="nav-link" href="{{url_for('core.info')}}">Sobre</a>
           </li>
 
-          {% if current_user.is_authenticated and current_user.trab_conv == 1 %}
-            <li class="nav-item dropdown">
-              <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown1" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                Convênios
-              </a>
-              <div class="dropdown-menu" aria-labelledby="navbarDropdown1">
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown1" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+              Convênios
+            </a>
+            <div class="dropdown-menu" aria-labelledby="navbarDropdown1">
+              {% if current_user.is_authenticated and current_user.trab_conv == 1 %}
                 <a class="dropdown-item" href="{{url_for('convenios.lista_programas_pref')}}">Programas</a>
                 <a class="dropdown-item" href="{{url_for('convenios.lista_convenios_SICONV',lista='todos',coord='usu')}}">Lista todos</a>
                 <a class="dropdown-item" href="{{url_for('convenios.lista_convenios_SICONV',lista='em execução',coord='usu')}}">Lista em execução</a>
                 <a class="dropdown-item" href="{{url_for('convenios.quadro_convenios')}}">Em execução por UF e Programa</a>
                 <a class="dropdown-item" href="{{url_for('convenios.resumo_convenios')}}">Histórico por Programa</a>
                 <a class="dropdown-item" href="{{url_for('convenios.brasil_convenios')}}">Mapa</a>
-                <a class="dropdown-item" href="{{url_for('convenios.bi_convenios')}}"><strong>BI Convênios</strong></a>
                 <a class="dropdown-item" href="{{url_for('convenios.msg_siconv')}}">Mensagens SICONV</a>
-              </div>
-            </li>
-          {% endif %}
+              {% endif %}
+              {% if sistema_bi and sistema_bi.bi_conv == 1 %}
+                <a class="dropdown-item" href="{{url_for('convenios.bi_convenios')}}">BI Convênios</a>
+              {% endif %}
+            </div>
+          </li>
 
-          {% if current_user.is_authenticated and current_user.trab_acordo == 1 %}
-            <li class="nav-item dropdown">
-              <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown2" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                Acordos/TEDs
-              </a>
-              <div class="dropdown-menu" aria-labelledby="navbarDropdown2">
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown2" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+              Acordos/TEDs
+            </a>
+            <div class="dropdown-menu" aria-labelledby="navbarDropdown2">
+              {% if current_user.is_authenticated and current_user.trab_acordo == 1 %}
                 <a class="dropdown-item" href="{{url_for('acordos.lista_programa_cnpq')}}">Programas CNPq</a>
                 <a class="dropdown-item" href="{{url_for('acordos.lista_acordos',lista='todos',coord='usu')}}">Todos</a>
                 <a class="dropdown-item" href="{{url_for('acordos.lista_acordos',lista='em execução',coord='usu')}}">Vigentes</a>
                 <a class="dropdown-item" href="{{url_for('acordos.quadro_acordos')}}">Vigentes por UF e Programa</a>
                 <a class="dropdown-item" href="{{url_for('acordos.resumo_acordos')}}">Histórico por Programa</a>
                 <a class="dropdown-item" href="{{url_for('acordos.brasil_acordos')}}">Mapa</a>
-                <a class="dropdown-item" href="{{url_for('acordos.bi_acordos')}}"><strong>BI Acordos</strong></a>
                 <a class="dropdown-item" href="{{url_for('bolsas.lista_bolsas')}}">Bolsas</a>
-              </div>
-            </li>
+              {% endif %}
+              {% if sistema_bi and sistema_bi.bi_acordo == 1 %}
+                <a class="dropdown-item" href="{{url_for('acordos.bi_acordos')}}">BI Acordos</a>
+              {% endif %}
+            </div>
+          </li>
 
-          {% endif %}
-
-          {% if current_user.is_authenticated %}
+          {% if current_user.is_authenticated and current_user.trab_ted == 1 %}
             <li class="nav-item active">
               <a class="nav-link" href="{{url_for('ted.gestao')}}">TED</a>
             </li>
@@ -166,6 +169,10 @@
                   {% if current_user.trab_conv == 1 %}
                     <button class="dropdown-item" data-toggle='modal' data-target='#siconv_modal'>Carrega SICONV</button>
                     <a class="dropdown-item" href="{{url_for('core.carregaMSG')}}">Carrega Caixa de Entrada SICONV</a>
+                  {% endif %}
+                  {% if current_user.trab_ted == 1 %}
+                    {% if current_user.trab_acordo == 1 or current_user.trab_conv == 1 %}<div class="dropdown-divider"></div>{% endif %}
+                    <a class="dropdown-item" href="{{url_for('ted.carrega')}}">Atualizar TED (TransfereGov)</a>
                   {% endif %}
                 </div>
               </li>
