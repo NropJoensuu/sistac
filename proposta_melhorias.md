@@ -99,12 +99,13 @@ outro momento.
 
 | # | Item | Descrição | Observação |
 |---|------|-----------|------------|
-| 6.1 | Renomear menu "Acordos/TEDs" | Remove a palavra "TEDs" do rótulo, fica só "Acordos" | Rápido, cosmético |
+| 6.1 | Renomear menu "Acordos/TEDs" | Remove a palavra "TEDs" do rótulo, fica só "Acordos" | **Concluído** |
 | 6.2 | Criar aba própria de TED | Nova aba, nos moldes visuais do módulo Convênios | Estrutura de tela pode sair rápido; dado real depende do item 6.4 |
 | 6.3 | Melhorar o sentido de "Instrumentos" | Ainda não detalhado — se é o nome, a descrição, ou os dados exibidos | Aguardando detalhamento de Igor |
 | 6.4 | Integração de dados de TED (SICONV/transferegov) | TED hoje não existe como dado — é só um rótulo, misturado com Acordo. Precisa de fonte de dados nova (API/portal do transferegov a pesquisar) | Grande, não é rápido — não depende só de reorganizar tela |
-| 6.5 | Substituir 3 dashboards por BI | Em Convênios: "Em execução por UF e Programa", "Histórico por Programa", "Mapa". Mesmo tratamento para Acordos e (futuramente) TED | **Priorizado agora** — é a demanda visual mais direta dos gestores, e o SISTAC já tem os dados |
+| 6.5 | Substituir 3 dashboards por BI | Em Convênios: "Em execução por UF e Programa", "Histórico por Programa", "Mapa". Mesmo tratamento para Acordos e (futuramente) TED | **Concluído para Convênios/Acordos/TED.** As 3 rotas antigas de Acordos (`resumo_acordos`, `brasil_acordos`, `quadro_acordos`) foram **comentadas** em `project/acordos/views.py` (não removidas — decisão sobre exclusão definitiva do código fica pendente), seus links tirados do menu, e os testes correspondentes removidos de `tests/test_acordos_dashboards.py`. |
 | 6.6 | Integração futura TED + Acordos | Unificação de dados/fluxo entre os dois | Futuro, não priorizado agora |
+| 6.7 | Curadoria do vínculo Processo-Mãe ↔ Acordo | Nova tela (`Acordos → Gestão → Curadoria`) que classifica automaticamente a correspondência entre os 139 processos-mãe reais (carregados via `cargaPDCTR`) e os Acordos cadastrados, usando FAP-direta/UF-dominante/texto (algoritmo validado interativamente: 108 de 139 com correspondência confiável). Vincula automaticamente os casos de confiança alta/média; os de UF-ambígua e sem-correspondência ficam numa fila de revisão manual, com indicador de progresso. | **Concluído.** Reaproveita a tabela `Acordo_ProcMae` já existente, agora com campos de auditoria (`tipo_evidencia`, `usuario_curador_id`, `data_vinculo`). |
 
 **Próximo passo combinado**: avançar com o item 6.5 (BI), já que é a demanda mais
 direta das chefias e o SISTAC já possui os dados necessários — só falta apresentá-los

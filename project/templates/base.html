@@ -84,19 +84,18 @@
 
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown2" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-              Acordos/TEDs
+              Acordos
             </a>
             <div class="dropdown-menu" aria-labelledby="navbarDropdown2">
               {% if current_user.is_authenticated and current_user.trab_acordo == 1 %}
+                <h6 class="dropdown-header">Gestão</h6>
+                <a class="dropdown-item" href="{{url_for('acordos.lista_acordos',lista='em execução',coord='usu')}}">Todos</a>
                 <a class="dropdown-item" href="{{url_for('acordos.lista_programa_cnpq')}}">Programas CNPq</a>
-                <a class="dropdown-item" href="{{url_for('acordos.lista_acordos',lista='todos',coord='usu')}}">Todos</a>
-                <a class="dropdown-item" href="{{url_for('acordos.lista_acordos',lista='em execução',coord='usu')}}">Vigentes</a>
-                <a class="dropdown-item" href="{{url_for('acordos.quadro_acordos')}}">Vigentes por UF e Programa</a>
-                <a class="dropdown-item" href="{{url_for('acordos.resumo_acordos')}}">Histórico por Programa</a>
-                <a class="dropdown-item" href="{{url_for('acordos.brasil_acordos')}}">Mapa</a>
+                <a class="dropdown-item" href="{{url_for('acordos.curadoria_processo_mae')}}">Curadoria — Vínculo Processo-Mãe ↔ Acordo</a>
                 <a class="dropdown-item" href="{{url_for('bolsas.lista_bolsas')}}">Bolsas</a>
               {% endif %}
               {% if sistema_bi and sistema_bi.bi_acordo == 1 %}
+                {% if current_user.is_authenticated and current_user.trab_acordo == 1 %}<div class="dropdown-divider"></div>{% endif %}
                 <a class="dropdown-item" href="{{url_for('acordos.bi_acordos')}}">BI Acordos</a>
               {% endif %}
             </div>

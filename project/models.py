@@ -216,9 +216,15 @@ class Processo_Mae (db.Model):
     pago_capital = db.Column(db.Float)
     pago_custeio = db.Column(db.Float)
     pago_bolsas  = db.Column(db.Float)
+    # curadoria do vínculo Acordo_ProcMae (ver acordos/services.py:
+    # classificar_e_vincular_processos_mae) — marca que um revisor humano
+    # já confirmou que este processo-mãe não tem Acordo correspondente,
+    # pra não continuar aparecendo na fila de pendentes
+    sem_acordo_confirmado = db.Column(db.Integer, default=0)
 
     def __init__ (self,cod_programa,nome_chamada,proc_mae,
-                  inic_mae, term_mae,coordenador,situ_mae,id_chamada,pago_capital,pago_custeio,pago_bolsas):
+                  inic_mae, term_mae,coordenador,situ_mae,id_chamada,pago_capital,pago_custeio,pago_bolsas,
+                  sem_acordo_confirmado=0):
         self.cod_programa = cod_programa
         self.nome_chamada = nome_chamada
         self.proc_mae     = proc_mae
@@ -226,6 +232,7 @@ class Processo_Mae (db.Model):
         self.term_mae     = term_mae
         self.coordenador  = coordenador
         self.situ_mae     = situ_mae
+        self.sem_acordo_confirmado = sem_acordo_confirmado
         self.id_chamada   = id_chamada
         self.pago_capital = pago_capital
         self.pago_custeio = pago_custeio
@@ -623,10 +630,19 @@ class Acordo_ProcMae(db.Model):
     id           = db.Column(db.Integer,primary_key = True)
     acordo_id    = db.Column(db.Integer, db.ForeignKey('acordos.id', ondelete="CASCADE"),nullable=False)
     proc_mae_id  = db.Column(db.Integer, db.ForeignKey('processo_mae.id', ondelete="CASCADE"),nullable=False)
+    # campos de auditoria (curadoria do vínculo Processo-Mãe -> Acordo,
+    # ver acordos/services.py:classificar_e_vincular_processos_mae) —
+    # mesmo padrão de TED_Vinculo_ProgramaCNPq
+    tipo_evidencia      = db.Column(db.String)
+    usuario_curador_id  = db.Column(db.Integer)
+    data_vinculo         = db.Column(db.DateTime)
 
-    def __init__ (self,acordo_id,proc_mae_id):
-        self.acordo_id    = acordo_id
-        self.proc_mae_id  = proc_mae_id
+    def __init__ (self,acordo_id,proc_mae_id,tipo_evidencia=None,usuario_curador_id=None,data_vinculo=None):
+        self.acordo_id           = acordo_id
+        self.proc_mae_id         = proc_mae_id
+        self.tipo_evidencia      = tipo_evidencia
+        self.usuario_curador_id  = usuario_curador_id
+        self.data_vinculo        = data_vinculo
 
     def __repr__ (self):
         return f"{self.acordo_id};{self.proc_mae_id}"

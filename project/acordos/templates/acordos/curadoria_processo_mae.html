@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+
+  <div class="card border-primary mb-3">
+    <div class="card-header">
+      <h3>Curadoria — Vínculo Processo-Mãe ↔ Acordo</h3>
+      <small class="text-muted">Correspondência entre os processos-mãe da folha PDCTR e os Acordos registrados. Casos de confiança alta/média são vinculados automaticamente; os demais ficam nesta fila, para decisão do curador.</small>
+    </div>
+
+    <div class="card-body">
+
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="text-muted" style="font-size:0.9rem">
+          <strong>{{ concluidos }}</strong> de <strong>{{ total }}</strong> processos-mãe já tratados
+          {% if total %}({{ (100 * concluidos / total) | round(1) }}%){% endif %}
+        </div>
+        <div class="text-muted" style="font-size:0.9rem">
+          {{ pendentes }} pendente(s) de revisão manual
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-striped table-sm">
+          <thead>
+            <tr>
+              <th>Processo-mãe</th>
+              <th>Chamada</th>
+              <th>Classificação</th>
+              <th>Candidatos (mesma UF)</th>
+              <th class="text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in fila %}
+              {% set mae = item.processo_mae %}
+              <tr>
+                <td>
+                  <div class="font-weight-bold">{{ mae.proc_mae }}</div>
+                  <div class="text-muted" style="font-size:0.8rem">{{ mae.coordenador or '—' }}</div>
+                </td>
+                <td>{{ mae.nome_chamada or '—' }}</td>
+                <td>
+                  {% if item.nivel == 'media_uf_ambigua' %}
+                    <span class="badge badge-warning">UF ambígua</span>
+                  {% else %}
+                    <span class="badge badge-secondary">Sem correspondência</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if item.candidatos_uf %}
+                    {% for ac in item.candidatos_uf %}
+                      <span class="badge badge-light border">{{ ac.nome }} — {{ ac.epe }}</span>
+                    {% endfor %}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td class="text-right">
+                  <a href="{{ url_for('acordos.vincula_curadoria', id_processo_mae=mae.id) }}" class="btn btn-outline-primary btn-sm">Vincular</a>
+                  <form method="POST" action="{{ url_for('acordos.sem_acordo_curadoria', id_processo_mae=mae.id) }}" class="d-inline">
+                    <button type="submit" class="btn btn-outline-secondary btn-sm" onclick="return confirm('Confirmar que este processo-mãe não tem Acordo correspondente?');">Sem Acordo</button>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5" class="text-center text-muted py-4">Nenhum processo-mãe pendente de revisão manual — curadoria em dia.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}

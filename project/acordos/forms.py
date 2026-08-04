@@ -145,3 +145,11 @@ class HomologadoForm(FlaskForm):
     valor      = StringField('Valor:')
 
     submit     = SubmitField('Registrar')
+
+
+class VinculoCuradoriaForm(FlaskForm):
+    """Confirma manualmente o vínculo de um Processo-Mãe a um Acordo (tela de curadoria)."""
+
+    acordo_id = SelectField('Acordo:', validators=[DataRequired(message="Escolha o Acordo!")])
+
+    submit    = SubmitField('Vincular')

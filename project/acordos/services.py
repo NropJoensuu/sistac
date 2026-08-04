@@ -8,6 +8,7 @@
 """
 
 import os
+import re
 import tempfile
 import locale
 import datetime
@@ -512,7 +513,10 @@ def maes_disponiveis_para_acordo(acordo_id):
 def associar_maes_ao_acordo(acordo_id, lista_ids_mae, usuario_id):
     """Associa um ou mais processos-mãe a um acordo."""
     for mae in lista_ids_mae:
-        acordo_procmae = Acordo_ProcMae(acordo_id=acordo_id, proc_mae_id=int(mae))
+        acordo_procmae = Acordo_ProcMae(
+            acordo_id=acordo_id, proc_mae_id=int(mae),
+            tipo_evidencia='manual_chamada', usuario_curador_id=usuario_id, data_vinculo=dt.now(),
+        )
         db.session.add(acordo_procmae)
 
     db.session.commit()
@@ -533,7 +537,10 @@ def incluir_processo_mae_manual(acordo_id, proc_mae, inic_mae, term_mae, coorden
 
     registra_log_auto(usuario_id, None, 'mae')
 
-    acordo_procmae = Acordo_ProcMae(acordo_id=acordo_id, proc_mae_id=proc_mae_manual.id)
+    acordo_procmae = Acordo_ProcMae(
+        acordo_id=acordo_id, proc_mae_id=proc_mae_manual.id,
+        tipo_evidencia='manual_novo_processo', usuario_curador_id=usuario_id, data_vinculo=dt.now(),
+    )
 
     db.session.add(acordo_procmae)
     db.session.commit()
@@ -1762,3 +1769,244 @@ def bi_acordos(filtros=None):
         'opcoes_uf': opcoes_uf,
         'opcoes_ano': opcoes_ano,
     }
+
+
+# =============================================================================
+# Curadoria Processo-Mãe <-> Acordo
+# =============================================================================
+#
+# Classifica automaticamente a correspondência entre Processo_Mae (vindo da
+# folha PDCTR) e Acordo, reaproveitando a tabela Acordo_ProcMae já existente
+# (agora com campos de auditoria: tipo_evidencia/usuario_curador_id/
+# data_vinculo). Algoritmo validado interativamente com Igor sobre os dados
+# reais (139 processos-mãe): 108 com correspondência confiável (88 alta + 20
+# média), 31 precisando revisão manual. Referência: analisa_correlacao_
+# acordos_bolsas.py (script de análise, fora do código de produção).
+
+def _normaliza_curadoria(texto):
+    """Minúsculo, sem acento/pontuação, pra comparar texto com folga."""
+    if not texto:
+        return ''
+    texto = str(texto).lower()
+    texto = re.sub(r'[^a-z0-9]+', ' ', texto)
+    return texto.strip()
+
+
+def _bate_textualmente_curadoria(nome_acordo, *campos_mae):
+    """Confere se o nome do acordo aparece (ou quase) em campos de texto do lado do processo-mãe."""
+    nome_norm = _normaliza_curadoria(nome_acordo)
+    if not nome_norm:
+        return False
+
+    for campo in campos_mae:
+        campo_norm = _normaliza_curadoria(campo)
+        if not campo_norm:
+            continue
+        if nome_norm in campo_norm or campo_norm in nome_norm:
+            return True
+        palavras = [p for p in nome_norm.split() if len(p) >= 4]
+        if palavras and sum(1 for p in palavras if p in campo_norm) >= max(1, len(palavras) - 1):
+            return True
+
+    return False
+
+
+def _sigla_inst_do_processo_mae(proc_mae):
+    """Sigla da instituição do primeiro pagamento vinculado a esse processo-mãe (PagamentosPDCTR.sigla_inst)."""
+    pagamento = db.session.query(PagamentosPDCTR.sigla_inst).filter_by(proc_mae=proc_mae).first()
+    return pagamento.sigla_inst if pagamento else None
+
+
+def _uf_dominante_do_processo_mae(proc_mae, limiar_dominancia=0.85):
+    """
+    UF mais frequente entre os pagamentos daquele processo-mãe, só se
+    representar pelo menos `limiar_dominancia` do total (padrão 85%,
+    validado com Igor). Caso contrário, None -- a divisão é próxima
+    demais pra confiar (diagnóstico mostrou que a UF do primeiro
+    pagamento sozinha era instável; o voto majoritário evita depender de
+    qual pagamento a query retorna primeiro).
+    """
+    contagens = db.session.query(
+        PagamentosPDCTR.uf_inst, func.count(PagamentosPDCTR.uf_inst).label('qtd'))\
+        .filter_by(proc_mae=proc_mae)\
+        .group_by(PagamentosPDCTR.uf_inst)\
+        .order_by(func.count(PagamentosPDCTR.uf_inst).desc())\
+        .all()
+
+    if not contagens:
+        return None
+
+    total = sum(qtd for _, qtd in contagens)
+    uf_mais_frequente, qtd_mais_frequente = contagens[0]
+
+    if uf_mais_frequente and qtd_mais_frequente / total >= limiar_dominancia:
+        return uf_mais_frequente
+    return None
+
+
+def classificar_processo_mae(mae, acordos):
+    """
+    Classifica um processo-mãe quanto à correspondência com os acordos
+    existentes (lista já carregada, pra não repetir a query pra cada
+    processo-mãe), em 4 níveis:
+
+    - alta: FAP-direta (Acordo.epe == sigla_inst do pagamento) ou
+      UF-dominante batem, E o nome do acordo bate textualmente com a
+      chamada do processo-mãe.
+    - media: FAP-direta bate, mesmo sem bater o texto -- sinal
+      institucional direto já é confiável sozinho.
+    - media_uf_ambigua: só a UF-dominante bate (sem FAP-direta, sem
+      texto) -- não confiável sozinha: quase toda UF tem vários
+      programas recorrentes (Centelha, ProfixJD, DCR, PDCTR, ...), então
+      fica pra revisão manual, junto com os candidatos da mesma UF.
+    - sem_match: nada bate.
+
+    ("baixa", só texto sem sinal institucional, fica fora deste
+    framework de 4 níveis -- cai em sem_match.)
+
+    Retorna (nivel, acordo_escolhido, candidatos_mesma_uf).
+    """
+    sigla_inst = _sigla_inst_do_processo_mae(mae.proc_mae)
+    sigla_norm = _normaliza_curadoria(sigla_inst)
+
+    acordo_fap = None
+    if sigla_norm:
+        for ac in acordos:
+            if _normaliza_curadoria(ac.epe) == sigla_norm:
+                acordo_fap = ac
+                break
+
+    if acordo_fap is not None:
+        if _bate_textualmente_curadoria(acordo_fap.nome, mae.nome_chamada):
+            return 'alta', acordo_fap, []
+        return 'media', acordo_fap, []
+
+    uf_dominante = _uf_dominante_do_processo_mae(mae.proc_mae)
+    candidatos_uf = [ac for ac in acordos if ac.uf == uf_dominante] if uf_dominante else []
+
+    if candidatos_uf:
+        for ac in candidatos_uf:
+            if _bate_textualmente_curadoria(ac.nome, mae.nome_chamada):
+                return 'alta', ac, []
+        return 'media_uf_ambigua', None, candidatos_uf
+
+    return 'sem_match', None, []
+
+
+def _maes_ja_tratadas():
+    """IDs de Processo_Mae que já têm vínculo (Acordo_ProcMae) ou já foram confirmados sem Acordo."""
+    vinculados = {a.proc_mae_id for a in db.session.query(Acordo_ProcMae.proc_mae_id).all()}
+    sem_acordo = {m.id for m in db.session.query(Processo_Mae.id)
+                  .filter(Processo_Mae.sem_acordo_confirmado == 1).all()}
+    return vinculados | sem_acordo
+
+
+def classificar_e_vincular_processos_mae(usuario_id=None):
+    """
+    Roda a classificação de curadoria sobre os processos-mãe ainda sem
+    tratamento (nem vínculo, nem confirmação de "sem Acordo"), e vincula
+    automaticamente os de confiança alta/média, registrando
+    tipo_evidencia/data_vinculo. Os de média-UF-ambígua e sem-
+    correspondência NÃO são vinculados automaticamente -- ficam pra fila
+    de revisão manual (fila_curadoria_processos_mae).
+
+    usuario_id=None quando disparado automaticamente (ao abrir a tela de
+    curadoria, ou por rotina agendada) -- fica registrado como vínculo
+    do "sistema", mesmo espírito do usuário 'sistema' já usado nas
+    cargas automáticas de outros módulos.
+    """
+    acordos = Acordo.query.all()
+    tratadas = _maes_ja_tratadas()
+
+    maes_pendentes = Processo_Mae.query.filter(~Processo_Mae.id.in_(tratadas)).all() if tratadas \
+        else Processo_Mae.query.all()
+
+    qtd_alta = qtd_media = qtd_pendente = 0
+
+    for mae in maes_pendentes:
+        nivel, acordo, _ = classificar_processo_mae(mae, acordos)
+
+        if nivel in ('alta', 'media'):
+            vinculo = Acordo_ProcMae(
+                acordo_id=acordo.id, proc_mae_id=mae.id,
+                tipo_evidencia=f'auto_{nivel}', usuario_curador_id=usuario_id, data_vinculo=dt.now(),
+            )
+            db.session.add(vinculo)
+            if nivel == 'alta':
+                qtd_alta += 1
+            else:
+                qtd_media += 1
+        else:
+            qtd_pendente += 1
+
+    db.session.commit()
+
+    return {'qtd_alta': qtd_alta, 'qtd_media': qtd_media, 'qtd_pendente': qtd_pendente}
+
+
+def fila_curadoria_processos_mae():
+    """
+    Monta a fila de revisão manual da curadoria: processos-mãe ainda sem
+    vínculo confirmado (média-UF-ambígua ou sem-correspondência), com o
+    nível de classificação e os candidatos de mesma UF quando houver,
+    mais o indicador de progresso geral (mesmo espírito do indicador de
+    curadoria do BI de TED: X de Y já tratados).
+    """
+    acordos = Acordo.query.all()
+
+    total = Processo_Mae.query.count()
+    tratadas = _maes_ja_tratadas()
+
+    maes_pendentes = Processo_Mae.query.filter(~Processo_Mae.id.in_(tratadas)).all() if tratadas \
+        else Processo_Mae.query.all()
+
+    fila = []
+    for mae in maes_pendentes:
+        nivel, _, candidatos_uf = classificar_processo_mae(mae, acordos)
+        fila.append({'processo_mae': mae, 'nivel': nivel, 'candidatos_uf': candidatos_uf})
+
+    fila.sort(key=lambda item: (item['nivel'] != 'media_uf_ambigua', item['processo_mae'].proc_mae or ''))
+
+    return {
+        'fila': fila,
+        'total': total,
+        'concluidos': len(tratadas),
+        'pendentes': len(fila),
+    }
+
+
+def acordos_choices():
+    """Todos os acordos, formatados para um SelectField (curadoria manual)."""
+    acordos = Acordo.query.order_by(Acordo.nome).all()
+    return [(str(a.id), f'{a.nome} — {a.epe} — {a.uf}') for a in acordos]
+
+
+def confirmar_vinculo_processo_mae(proc_mae_id, acordo_id, usuario_id):
+    """Confirma manualmente (curadoria) o vínculo entre um processo-mãe e um acordo."""
+    vinculo = Acordo_ProcMae(
+        acordo_id=acordo_id, proc_mae_id=proc_mae_id,
+        tipo_evidencia='manual_curadoria', usuario_curador_id=usuario_id, data_vinculo=dt.now(),
+    )
+    db.session.add(vinculo)
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'ass')
+
+
+def confirmar_sem_acordo_processo_mae(proc_mae_id, usuario_id):
+    """
+    Marca que o curador confirmou que esse processo-mãe não tem Acordo
+    correspondente. Usa um flag em Processo_Mae (não um acordo_id nulo
+    em Acordo_ProcMae, que é NOT NULL) para diferenciar "ainda não
+    revisado" de "revisado, sem correspondência".
+    """
+    mae = db.session.get(Processo_Mae, proc_mae_id)
+    if mae is None:
+        return False
+
+    mae.sem_acordo_confirmado = 1
+    db.session.commit()
+
+    registra_log_auto(usuario_id, None, 'mae')
+
+    return True

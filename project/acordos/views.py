@@ -58,6 +58,9 @@
     * Edições de cada programa: edic_programa
     * Gasto mensal por acordo: gasto_mes
     * Listar processos de uma chamada: processos_chamada
+    * Curadoria do vínculo Processo-Mãe <-> Acordo: curadoria_processo_mae
+    * Confirmar vínculo manual da curadoria: vincula_curadoria
+    * Confirmar que um processo-mãe não tem Acordo correspondente: sem_acordo_curadoria
 
 """
 
@@ -74,7 +77,7 @@ from project.models import Acordo, RefCargaPDCTR, PagamentosPDCTR, Processo_Mae,
                            capital_custeio,DadosSEI, chamadas_cnpq, chamadas_cnpq_acordos, financeiro_acordo, RefSICONV
 from project.acordos.forms import AcordoForm, Programa_CNPqForm, func_ProcMae_Acordo, ListaForm, ArquivoForm,\
                                   Altera_proc_mae_Form, ProgAcordoForm, Inclui_proc_mae_Form, ChamadaAcordoForm,\
-                                  EscolheMaeForm
+                                  EscolheMaeForm, VinculoCuradoriaForm
 from project.demandas.views import registra_log_auto
 from project.core.services import consultaDW, chamadas_DW
 from project.acordos import services
@@ -806,20 +809,22 @@ def lista_bolsistas_acordo(acordo_id):
 #
 ## RESUMO acordos
 
-@acordos.route('/resumo_acordos')
-@login_required
-def resumo_acordos():
-    """
-    +---------------------------------------------------------------------------------------+
-    |Apresenta um resumo dos acordos por programa da coordenação.                           |
-    |                                                                                       |
-    +---------------------------------------------------------------------------------------+
-    """
-
-    programas = services.resumo_acordos_por_programa(current_user.coord)
-
-    return render_template('resumo_acordos.html',programas=programas,
-                                                 unidade=current_user.coord)
+# Desativado em favor do BI Acordos (ver proposta_melhorias.md) — mantido
+# comentado, não removido, até decisão final sobre remoção definitiva do código.
+# @acordos.route('/resumo_acordos')
+# @login_required
+# def resumo_acordos():
+#     """
+#     +---------------------------------------------------------------------------------------+
+#     |Apresenta um resumo dos acordos por programa da coordenação.                           |
+#     |                                                                                       |
+#     +---------------------------------------------------------------------------------------+
+#     """
+#
+#     programas = services.resumo_acordos_por_programa(current_user.coord)
+#
+#     return render_template('resumo_acordos.html',programas=programas,
+#                                                  unidade=current_user.coord)
 
 #
 ## BI de acordos (Etapa 2 do roadmap_bi_sistac.md) — visão consolidada,
@@ -872,34 +877,38 @@ def edic_programa(cod_programa,sigla):
 #
 ## acordos  no mapa do Brasil
 
-@acordos.route('/brasil_acordos')
-def brasil_acordos():
-    """
-    +---------------------------------------------------------------------------------------+
-    |Apresenta um mapa onde se pode verificar os acordos e encomendas por UF.               |
-    +---------------------------------------------------------------------------------------+
-    """
-
-    mapa_html = services.gerar_mapa_brasil_acordos()
-
-    return render_template('brasil_convenios.html', m = mapa_html)
+# Desativado em favor do BI Acordos (ver proposta_melhorias.md) — mantido
+# comentado, não removido, até decisão final sobre remoção definitiva do código.
+# @acordos.route('/brasil_acordos')
+# def brasil_acordos():
+#     """
+#     +---------------------------------------------------------------------------------------+
+#     |Apresenta um mapa onde se pode verificar os acordos e encomendas por UF.               |
+#     +---------------------------------------------------------------------------------------+
+#     """
+#
+#     mapa_html = services.gerar_mapa_brasil_acordos()
+#
+#     return render_template('brasil_convenios.html', m = mapa_html)
 
 
 ## acordos no quadro por uf
 
-@acordos.route('/quadro_acordos')
-@login_required
-def quadro_acordos():
-    """
-    +---------------------------------------------------------------------------------------+
-    |Apresenta um quadro onde se pode verificar os acordos por UF.                          |
-    +---------------------------------------------------------------------------------------+
-    """
-
-    dados = services.quadro_acordos_por_uf(current_user.coord)
-
-    return render_template('quadro_acordos.html', quantidade=dados['quantidade'],
-                            programas=dados['programas'],linhas=dados['linhas'])
+# Desativado em favor do BI Acordos (ver proposta_melhorias.md) — mantido
+# comentado, não removido, até decisão final sobre remoção definitiva do código.
+# @acordos.route('/quadro_acordos')
+# @login_required
+# def quadro_acordos():
+#     """
+#     +---------------------------------------------------------------------------------------+
+#     |Apresenta um quadro onde se pode verificar os acordos por UF.                          |
+#     +---------------------------------------------------------------------------------------+
+#     """
+#
+#     dados = services.quadro_acordos_por_uf(current_user.coord)
+#
+#     return render_template('quadro_acordos.html', quantidade=dados['quantidade'],
+#                             programas=dados['programas'],linhas=dados['linhas'])
 
 #
 ### gasto mês por acordo  (DESCONTINUADO)
@@ -1024,3 +1033,63 @@ def carregaidrel():
     print ('*** ',i,' alterações em chamadas')
 
     return redirect(url_for('core.inicio'))
+
+
+#
+## Curadoria Processo-Mãe <-> Acordo
+
+@acordos.route('/curadoria_processo_mae')
+@login_required
+def curadoria_processo_mae():
+    """
+    +---------------------------------------------------------------------------------------+
+    |Fila de revisão da curadoria do vínculo Processo-Mãe <-> Acordo. Ao abrir a tela,       |
+    |roda a classificação automática (vincula direto os casos de confiança alta/média,       |
+    |registrado como vínculo do "sistema") e mostra os casos que precisam de decisão do      |
+    |curador (média-UF-ambígua e sem-correspondência), com os candidatos de mesma UF já      |
+    |levantados. Indicador de progresso: X de Y processos-mãe já tratados.                   |
+    +---------------------------------------------------------------------------------------+
+    """
+    services.classificar_e_vincular_processos_mae(usuario_id=None)
+
+    dados = services.fila_curadoria_processos_mae()
+
+    return render_template('curadoria_processo_mae.html', **dados)
+
+
+@acordos.route('/<int:id_processo_mae>/vincula_curadoria', methods=['GET', 'POST'])
+@login_required
+def vincula_curadoria(id_processo_mae):
+    """
+    +---------------------------------------------------------------------------------------+
+    |Confirma manualmente (curadoria) o vínculo de um processo-mãe a um Acordo.              |
+    +---------------------------------------------------------------------------------------+
+    """
+    processo_mae = Processo_Mae.query.get_or_404(id_processo_mae)
+
+    form = VinculoCuradoriaForm()
+    form.acordo_id.choices = services.acordos_choices()
+
+    if form.validate_on_submit():
+        services.confirmar_vinculo_processo_mae(
+            proc_mae_id=id_processo_mae, acordo_id=int(form.acordo_id.data), usuario_id=current_user.id,
+        )
+        flash('Processo-mãe vinculado ao Acordo!', 'sucesso')
+        return redirect(url_for('acordos.curadoria_processo_mae'))
+
+    return render_template('vincula_curadoria.html', form=form, processo_mae=processo_mae)
+
+
+@acordos.route('/<int:id_processo_mae>/sem_acordo_curadoria', methods=['POST'])
+@login_required
+def sem_acordo_curadoria(id_processo_mae):
+    """
+    +---------------------------------------------------------------------------------------+
+    |Confirma que um processo-mãe não tem Acordo correspondente (curadoria manual).          |
+    +---------------------------------------------------------------------------------------+
+    """
+    services.confirmar_sem_acordo_processo_mae(id_processo_mae, current_user.id)
+
+    flash('Processo-mãe marcado como sem Acordo correspondente.', 'sucesso')
+
+    return redirect(url_for('acordos.curadoria_processo_mae'))
