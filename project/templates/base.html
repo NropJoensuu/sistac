@@ -58,8 +58,24 @@
             <a class="nav-link" href="{{url_for('core.inicio')}}">Início<span class="sr-only">(current)</span></a>
           </li>
 
-          <li class="nav-item active">
-            <a class="nav-link" href="{{url_for('core.info')}}">Sobre</a>
+          {% if sistema_bi and sistema_bi.bi_painel_executivo == 1 %}
+            <li class="nav-item">
+              <a class="nav-link" href="{{url_for('painel_executivo.painel_executivo_view')}}">Painel Executivo</a>
+            </li>
+          {% endif %}
+
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown3" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+              TED
+            </a>
+            <div class="dropdown-menu" aria-labelledby="navbarDropdown3">
+              {% if current_user.is_authenticated and current_user.trab_ted == 1 %}
+                <a class="dropdown-item" href="{{url_for('ted.gestao')}}">Gestão</a>
+              {% endif %}
+              {% if sistema_bi and sistema_bi.bi_ted == 1 %}
+                <a class="dropdown-item" href="{{url_for('ted.bi_ted')}}">BI TED</a>
+              {% endif %}
+            </div>
           </li>
 
           <li class="nav-item dropdown">
@@ -97,20 +113,6 @@
               {% if sistema_bi and sistema_bi.bi_acordo == 1 %}
                 {% if current_user.is_authenticated and current_user.trab_acordo == 1 %}<div class="dropdown-divider"></div>{% endif %}
                 <a class="dropdown-item" href="{{url_for('acordos.bi_acordos')}}">BI Acordos</a>
-              {% endif %}
-            </div>
-          </li>
-
-          <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown3" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-              TED
-            </a>
-            <div class="dropdown-menu" aria-labelledby="navbarDropdown3">
-              {% if current_user.is_authenticated and current_user.trab_ted == 1 %}
-                <a class="dropdown-item" href="{{url_for('ted.gestao')}}">Gestão</a>
-              {% endif %}
-              {% if sistema_bi and sistema_bi.bi_ted == 1 %}
-                <a class="dropdown-item" href="{{url_for('ted.bi_ted')}}">BI TED</a>
               {% endif %}
             </div>
           </li>
@@ -214,10 +216,14 @@
             </div>
           </li>
 
+          <li class="nav-item active">
+            <a class="nav-link" href="{{url_for('core.info')}}">Sobre</a>
+          </li>
+
         </ul>
 
-        {% set ver = namespace(num='5.0.14') %}
-        <span class="navbar-text">  v. {{ ver.num }} <small>cbt</small> </span>
+        {% set ver = namespace(num='5.1.15') %}
+        <span class="navbar-text">  v. {{ ver.num }} <small>ibc</small> </span>
 
       </div>
     </nav>

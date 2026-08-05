@@ -1514,9 +1514,10 @@ class Sistema(db.Model):
     bi_conv               = db.Column(db.Integer,default=1)
     bi_acordo             = db.Column(db.Integer,default=1)
     bi_ted                = db.Column(db.Integer,default=1)
+    bi_painel_executivo   = db.Column(db.Integer,default=1)
 
     def __init__(self, nome_sistema, descritivo,funcionalidade_conv,funcionalidade_acordo,funcionalidade_instru,carga_auto,\
-                 funcionalidade_ted=0,bi_conv=1,bi_acordo=1,bi_ted=1):
+                 funcionalidade_ted=0,bi_conv=1,bi_acordo=1,bi_ted=1,bi_painel_executivo=1):
 
         self.nome_sistema          = nome_sistema
         self.descritivo            = descritivo
@@ -1528,6 +1529,7 @@ class Sistema(db.Model):
         self.bi_conv               = bi_conv
         self.bi_acordo             = bi_acordo
         self.bi_ted                = bi_ted
+        self.bi_painel_executivo   = bi_painel_executivo
 
     def __repr__(self):
 

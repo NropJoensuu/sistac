@@ -157,6 +157,14 @@ trabalho que "termina" — TEDs novos vão continuar precisando de vínculo manu
 
 ## ETAPA 4 — Painel Executivo
 
+> **Concluído** — ver `etapa4_painel_executivo.md` (proposta funcional
+> detalhada) e `proposta_melhorias.md` item 6.8. Uma correção importante foi
+> feita em relação ao esboço abaixo: "somando Convênio + Acordo + TED numa
+> vista só" foi substituído por **Captado (TED) e Executado (Convênio+Acordo)
+> sempre separados**, pra evitar dupla contagem (TED financia Acordo/Convênio
+> do mesmo programa — somar os três contaria o mesmo real duas vezes). Ver
+> `correcao_painel_executivo_dupla_contagem.txt`.
+
 ### Objetivo
 Visão consolidada, para quem decide no nível mais alto, organizada pelo
 **Programa CNPq** — não pelo instrumento. Responde à pergunta "como está indo
@@ -216,7 +224,7 @@ Acordos
 TEDs
   ├── Gestão   (novo — Etapa 3)
   └── BI       (novo — Etapa 3)
-Painel Executivo   (Etapa 4 — acesso restrito a Presidência/Diretoria/Coord.-Gerais)
+Painel Executivo   (Etapa 4 — público, sem login, mesmo padrão dos outros BIs)
 ```
 
 Cada módulo (Convênios, Acordos, TEDs) passa a ter a mesma estrutura de duas

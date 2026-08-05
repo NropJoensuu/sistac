@@ -73,6 +73,8 @@ from project.instrumentos.views import instrumentos
 
 from project.ted.views import ted
 
+from project.painel_executivo.views import painel_executivo
+
 app.register_blueprint(core)
 app.register_blueprint(users)
 app.register_blueprint(demandas,url_prefix='/demandas')
@@ -86,6 +88,8 @@ app.register_blueprint(convenios,url_prefix='/convenios')
 app.register_blueprint(instrumentos,url_prefix='/instrumentos')
 
 app.register_blueprint(ted,url_prefix='/ted')
+
+app.register_blueprint(painel_executivo,url_prefix='/painel_executivo')
 
 
 ############################################

@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+
+  <div class="card border-primary mb-3">
+    <div class="card-header">
+      <h3>Painel Executivo</h3>
+      <small class="text-muted">Visão consolidada por Programa CNPq dos 3 instrumentos (Convênio, Acordo, TED) — Etapa 4 do roadmap de BI.</small>
+    </div>
+
+    <div class="card-body">
+
+      <div class="alert alert-warning" role="alert">
+        <strong>Captado × Executado, sem soma entre os dois:</strong> TED representa dinheiro
+        <em>captado</em> pelo CNPq de outro órgão (MCTI, FNDCT etc.), que o CNPq depois
+        <em>executa</em> via Convênio ou Acordo. Somar os três instrumentos num total único
+        contaria o mesmo real duas vezes. Por isso esta tela sempre mostra <strong>Captado (TED)</strong>
+        e <strong>Executado (Convênio + Acordo)</strong> separados. A reconciliação exata de qual TED
+        financiou qual Acordo/Convênio específico é item futuro (ver proposta de melhorias, item 6.6).
+      </div>
+
+      <form method="get" class="form-inline mb-4" action="{{ url_for('painel_executivo.painel_executivo_view') }}">
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="programa">Programa CNPq:</label>
+          <select class="form-control" id="programa" name="programa">
+            <option value="">Todos</option>
+            {% for p in opcoes_programa %}
+              <option value="{{ p }}" {% if filtros.programa == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="ano">Ano:</label>
+          <select class="form-control" id="ano" name="ano">
+            <option value="">Todos</option>
+            {% for a in opcoes_ano %}
+              <option value="{{ a }}" {% if filtros.ano == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary mb-2">Filtrar</button>
+        <a href="{{ url_for('painel_executivo.painel_executivo_view') }}" class="btn btn-outline-secondary mb-2 ml-2">Limpar</a>
+      </form>
+
+      <!-- KPIs -->
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <div class="card text-center border-info">
+            <div class="card-body">
+              <span class="font-weight-light">Captado (TED)</span>
+              <h4>{{ valor_total_captado | converte_para_real }}</h4>
+              <small class="text-muted">{{ cobertura_captado }}% com Programa CNPq confirmado</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center border-success">
+            <div class="card-body">
+              <span class="font-weight-light">Executado (Convênio + Acordo)</span>
+              <h4>{{ valor_total_executado | converte_para_real }}</h4>
+              <small class="text-muted">{{ cobertura_executado }}% com Programa CNPq confirmado</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Programas CNPq com instrumento vinculado</span>
+              <h4>{{ qtd_programas_com_instrumento }}</h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <span class="font-weight-light">Programa Estratégico</span>
+              <h4>—</h4>
+              <small class="text-muted">Fora de escopo nesta etapa</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- gráficos -->
+      <div class="row mb-4">
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header">Top Programas CNPq — Executado (Convênio+Acordo), TED em coluna separada</div>
+            <div class="card-body"><canvas id="chartRanking"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header">Evolução anual — Captado × Executado</div>
+            <div class="card-body"><canvas id="chartEvolucao"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-striped table-sm">
+          <thead>
+            <tr>
+              <th>Programa CNPq</th>
+              <th class="text-right">Executado (Convênio+Acordo)</th>
+              <th class="text-right">Convênio</th>
+              <th class="text-right">Acordo</th>
+              <th class="text-right">Captado (TED)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in ranking %}
+              <tr>
+                <td>{{ p.programa }}</td>
+                <td class="text-right">{{ p.executado | converte_para_real }}</td>
+                <td class="text-right">{{ p.convenio | converte_para_real }}</td>
+                <td class="text-right">{{ p.acordo | converte_para_real }}</td>
+                <td class="text-right">{{ p.captado_ted | converte_para_real }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5" class="text-center text-muted py-4">Nenhum programa com instrumento vinculado ainda.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+  const ranking = {{ ranking | tojson }};
+  const evolucao = {{ evolucao | tojson }};
+
+  new Chart(document.getElementById('chartRanking'), {
+    type: 'bar',
+    data: {
+      labels: ranking.map(p => p.programa),
+      datasets: [
+        { label: 'Executado (Convênio+Acordo)', data: ranking.map(p => p.executado) },
+        { label: 'Captado (TED)', data: ranking.map(p => p.captado_ted) },
+      ],
+    },
+    options: { indexAxis: 'y' },
+  });
+
+  new Chart(document.getElementById('chartEvolucao'), {
+    type: 'line',
+    data: {
+      labels: evolucao.map(e => e.ano),
+      datasets: [
+        { label: 'Executado (Convênio+Acordo)', data: evolucao.map(e => e.executado) },
+        { label: 'Captado (TED)', data: evolucao.map(e => e.captado) },
+      ],
+    },
+  });
+</script>
+{% endblock %}
