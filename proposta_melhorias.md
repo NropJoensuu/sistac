@@ -185,6 +185,42 @@ espaço.
 
 ---
 
+## 9. 🚨 URGENTE — URL do SICONV (repositorio.dados.gov.br) será desligada em 31/08/2026
+
+Confirmado via Comunicado Transferegov nº 23/2026 (17/07/2026, oficial):
+`http://repositorio.dados.gov.br/seges/detru/` — a URL configurada hoje em
+`URL_SICONV` — **para de funcionar em 31/08/2026**. Sem ação, a carga de
+Convênios (`cargaSICONV()`) vai quebrar nessa data.
+
+**O que já se sabe:**
+- Existe um novo ambiente: `https://api-publica.transferegov.gestao.gov.br/`
+- Pra Convênios ("módulo Discricionárias e Legais"), o que existe lá por
+  enquanto é uma nova área de **download de CSV** (mesmo formato de
+  sempre), não uma API estruturada tipo a do TED ainda — essa API completa
+  só chega em fases, entre nov/2026 e out/2027
+- **Não foi possível confirmar o caminho exato dos novos arquivos CSV** —
+  a página oficial de download (`/dados-abertos/download-dados`) ainda não
+  foi atualizada com os novos links, continua mostrando só os antigos (que
+  vão sumir)
+- O PDF de Histórico de Versões do Modelo de Dados (`historico_de_versoes.pdf`,
+  consultado até v25, 25/08/2025) confirma a estrutura atual dos CSVs, mas
+  não traz informação de endereço/migração
+
+**Atualização (04/08/2026): URL nova confirmada por Igor, testada e
+funcionando:**
+
+    https://api-publica.transferegov.gestao.gov.br/downloads/dadosgov/
+
+**Detalhe técnico importante**: o padrão de nome mudou — antes
+`siconv_convenio.csv.zip`, agora `siconv_convenio.zip` (sem `.csv` antes
+do `.zip`). Isso exige um ajuste pequeno no código (não só trocar a
+variável de ambiente), já passado para o Code corrigir junto — ver
+`prompt_atualiza_url_siconv.txt`. Ainda não confirmado se o nome do
+arquivo *dentro* do zip também mudou (só o nome externo do zip foi
+confirmado).
+
+---
+
 ## Como sugiro seguirmos
 
 **Prioridade atual (janela política em aberto):** avançar com o item 6.5 (BI sobre

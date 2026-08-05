@@ -19,7 +19,16 @@ import glob
 
 TOP_LEVEL_DIR = os.path.abspath(os.curdir)
 
-app = Flask (__name__, static_url_path=None, instance_relative_config=True, static_folder='/app/project/static')
+# static_folder era um caminho absoluto fixo do container Docker de
+# produção ('/app/project/static'), que não existe em nenhum outro
+# ambiente (Codespace, etc.) — qualquer link para /static/arquivo
+# respondia 404, mesmo com o arquivo existindo de verdade em
+# project/static/ no disco (mesmo padrão de bug já corrigido em pontos
+# de uso específicos, ver os caminhos com app.root_path em
+# acordos/convenios/ted/demandas services.py). Corrigido pra um caminho
+# relativo ao próprio pacote, portável entre ambientes.
+app = Flask (__name__, static_url_path=None, instance_relative_config=True,
+             static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 
 app.config.from_pyfile('flask.cfg')
 
