@@ -146,42 +146,62 @@ ou de decisões de infraestrutura do CNPq:
 
 ---
 
-## 8. Infraestrutura de testes — proteção contra efeito colateral em dado persistente/singleton (pendente)
+## 8. ✅ RESOLVIDO — Infraestrutura de testes — proteção contra efeito colateral em dado persistente/singleton
 
-Já ocorreram vários casos de testes que escrevem em dado **persistente e
-compartilhado** entre execuções (a linha única de `Sistema`, contas de usuário
-reais no banco de dev, e — achado novo durante o BI de TED — tabelas de
-conteúdo inteiras) e não restauram o estado original ao terminar:
+Já tinham ocorrido vários casos de testes que escrevem em dado **persistente e
+compartilhado** entre execuções (a linha única de `Sistema`, a linha única de
+`RefSICONV`, contas de usuário reais no banco de dev, e tabelas de conteúdo
+inteiras) e não restauravam o estado original ao terminar:
 
 - A linha única de `Sistema` e contas reais (ex: `igorc@cnpq.br`) já tiveram
   Gestão/BI desligados e permissões zeradas por um teste de
   `admin_reg_ver` que fazia POST minimalista deixando todo `BooleanField`
-  desmarcado — corrigido nesta sessão (o teste agora marca explicitamente os
-  campos que não estão sob teste).
-- Achado novo: `services.cargaTED()` faz *delete-and-reload* de verdade nas 3
-  tabelas espelho de TED (`TED_PlanoAcao`, `TED_Programa`,
-  `TED_TermoExecucao`) — comportamento correto da função, mas dois testes já
-  escritos (`test_carga_ted_mockada_popula_tabelas_espelho` e um teste novo
-  desta sessão, `test_data_ultima_carga_gravada_e_exibida`) chamam essa
-  função de verdade (só a chamada HTTP é mockada) contra o banco de dev
-  persistente. Resultado: toda vez que a suíte roda, os 301 TEDs reais
-  (carregados da API do TransfereGov) são substituídos pelos dados de
-  mock/vazios dos testes — precisei rodar `cargaTED()` de novo manualmente
-  pra repovoar dado real antes de revisar o BI de TED.
+  desmarcado.
+- `services.cargaTED()` faz *delete-and-reload* de verdade nas 3 tabelas
+  espelho de TED (`TED_PlanoAcao`, `TED_Programa`, `TED_TermoExecucao`) —
+  comportamento correto da função, mas dois testes (`test_carga_ted_mockada_
+  popula_tabelas_espelho` e `test_data_ultima_carga_gravada_e_exibida`) chamam
+  essa função de verdade (só a chamada HTTP é mockada) contra o banco de dev
+  persistente. Cada rodada da suíte substituía os TEDs reais pelos dados de
+  mock/vazios dos testes.
+- Achado durante a correção da URL do SICONV (item 9): `RefSICONV.cod_inst`
+  também é mutado sem restauração por um teste de `admin_reg_ver`
+  (`tests/test_users_admin.py`).
 
-Proposta (já cogitada antes): um fixture de teste que tira um "snapshot" do
-estado de `Sistema` (e, se fizer sentido, de contas de usuário sensíveis e/ou
-das tabelas de conteúdo que sofrem delete-and-reload, como as de TED) antes
-de qualquer teste que mexa nesses dados, e restaura automaticamente depois —
-independente do teste ter passado ou falhado. Alternativa mais simples só
-para os dados de TED: um banco de teste isolado/efêmero em vez do banco de
-desenvolvimento (mesma direção já apontada no comentário de
-`tests/conftest.py`: "Fase 2+... banco de teste isolado/efêmero em vez do
-banco de desenvolvimento").
+**Confirmado ao vivo, antes da correção**: `TED_PlanoAcao` estava com **0
+linhas** no banco de dev nesta sessão — os 301 TEDs reais carregados
+anteriormente já tinham sido apagados por essas rodadas de teste sem ninguém
+perceber, exatamente o cenário de risco que este item descrevia.
 
-Não é bloqueante para nenhum commit em andamento — é uma melhoria de
-infraestrutura de teste, a ser tratada como tarefa própria quando houver
-espaço.
+**Solução implementada** (`tests/conftest.py`):
+- `protege_dados_persistentes_singleton` (fixture **autouse**, roda ao redor
+  de todo teste): tira snapshot de todas as colunas da linha única de
+  `Sistema`, da linha única de `RefSICONV` e da conta real `igorc@cnpq.br`
+  antes do teste, e restaura depois — independente do teste ter passado ou
+  falhado. Testes que legitimamente alteram esses dados durante a execução
+  (ex: `test_users_config_sistema.py`) continuam funcionando normalmente; só
+  o estado final é que sempre volta ao original. **Elimina o ritual manual
+  de restauração pós-suíte** que vinha sendo repetido a cada sessão.
+- `preserva_tabelas_ted` (fixture opt-in, por ser mais cara — snapshot de 3
+  tabelas inteiras): restaura `TED_PlanoAcao`/`TED_Programa`/
+  `TED_TermoExecucao` ao estado anterior. Aplicada explicitamente nos 2
+  testes que chamam `cargaTED()` de verdade.
+
+**Verificação**: rodei `cargaTED()` de verdade pra repovoar os 301 TEDs reais
+(apagados antes da correção), depois rodei a suíte completa **duas vezes
+seguidas, sem nenhuma restauração manual entre elas**. Resultado idêntico nas
+duas rodadas: `Sistema`/`RefSICONV`/`igorc@cnpq.br` sempre no valor correto,
+`TED_TermoExecucao` estável em 262 (nenhum teste cria linhas sintéticas
+nessa tabela — sinal direto de que a restauração é exata), `TED_PlanoAcao`/
+`TED_Programa` estáveis (347/292 nas duas rodadas — a diferença em relação a
+301/278 é de fixtures sintéticas idempotentes de *outros* testes, como já é
+o padrão estabelecido no restante da suíte, não de vazamento). 201 testes
+passando.
+
+Alternativa de banco de teste isolado/efêmero (Fase 2+, já cogitada no
+comentário de `tests/conftest.py`) continua válida como evolução futura, mas
+não é mais bloqueante — a proteção via fixture já resolve o problema
+concreto.
 
 ---
 

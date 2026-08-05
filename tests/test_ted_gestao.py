@@ -134,11 +134,15 @@ def test_vincular_programa_cnpq_atualiza_estado(app):
         assert depois['programa_cnpq_nome'] == 'PCTT'
 
 
-def test_carga_ted_mockada_popula_tabelas_espelho(app):
+def test_carga_ted_mockada_popula_tabelas_espelho(app, preserva_tabelas_ted):
     """
     cargaTED() não bate na API real durante o teste — a chamada HTTP é
     mockada. Cobre o caso de plano_acao ainda 'EM_ELABORACAO', sem
     sq_instrumento (número do TED só existe depois de aprovado).
+
+    A função em si faz delete-and-reload real nas 3 tabelas-espelho de
+    TED — preserva_tabelas_ted (conftest.py) restaura os TEDs reais
+    depois do teste (ver proposta_melhorias.md, item 8).
     """
     fake_planos = [
         {

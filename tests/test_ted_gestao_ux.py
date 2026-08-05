@@ -146,7 +146,13 @@ def test_rota_exporta_csv_redireciona_para_estatico(client, app):
     assert 'ted.csv' in resp.headers['Location']
 
 
-def test_data_ultima_carga_gravada_e_exibida(client, app):
+def test_data_ultima_carga_gravada_e_exibida(client, app, preserva_tabelas_ted):
+    """
+    cargaTED() faz delete-and-reload real nas 3 tabelas-espelho de TED
+    -- aqui recarrega com listas vazias, que sem preserva_tabelas_ted
+    (conftest.py) apagaria os TEDs reais a cada rodada da suíte (ver
+    proposta_melhorias.md, item 8).
+    """
     user_id = _usuario(app, 'teste.tedultimacarga@teste.com', 'usuariotedultimacarga')
 
     fake_get_result = {'plano_acao': [], 'programa': [], 'termo_execucao': []}
