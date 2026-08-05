@@ -55,7 +55,7 @@ final desta seção, uma sugestão minha de sequenciamento dentro disso.
 | # | Item |
 |---|---|
 | A1 | Programa CNPq: hoje cadastrado manualmente — avaliar carregar automaticamente a partir dos dados do DW |
-| A2 | Gestão TED: texto da coluna em branco (cor branca sobre fundo branco) — corrigir pra preto |
+| A2 | ✅ Gestão TED: texto da coluna em branco (cor branca sobre fundo branco) — corrigido pra `text-dark`, mesmo padrão (ausência de classe de cor especial, texto escuro padrão do Bootstrap) usado nos cabeçalhos de tabela de Convênios/Acordos |
 | A3 | Gestão TED: separar coluna "Vigência" em duas — início e fim |
 | A4 | Gestão TED: colorir "Vigência fim" com o mesmo padrão de Convênios/Acordos (cinza a 90 dias do fim, amarelo a 60, vermelho a 30) |
 | A5 | Gestão TED: instituições devem aparecer pela sigla, não nome completo |
@@ -91,7 +91,7 @@ final desta seção, uma sugestão minha de sequenciamento dentro disso.
 | C2 | **A coluna "#" não é um ID estável** (varia conforme ordenação/filtro) — não serve pra relacionamento. Usar o número SEI (`nnnnnn/aaaa-dd`, já obrigatório no cadastro) como identificador real |
 | C3 | Renomear "Lista de Acordos/TEDs" → "Lista de Acordos" |
 | C4 | Renomear "Inserir detalhes de um Acordo/TED" → "Inserir detalhes de um Acordo" |
-| C5 | **Bug de dado**: campos Capital/Custeio/Bolsas em Acordo pertencem só ao CNPq — a fórmula está somando Valor CNPq + Valor EP indevidamente nesses campos. Remover a soma, adicionar tooltip explicando |
+| C5 | ✅ **Bug de dado**: campos Capital/Custeio/Bolsas em Acordo pertencem só ao CNPq — a fórmula comparava contra Valor CNPq + Valor EP indevidamente. Corrigido em `criar_acordo`/`atualizar_acordo` (`project/acordos/services.py`) pra comparar só contra Valor CNPq; tooltip adicionado em `add_acordo.html`. **Exceção documentada**: 6 acordos reais legados com "TED" no nome (ex: "ProfixJD-2022 - TED", "Centelha 2021 - TED", "PPP, PRONEM e PRONEX - TED") usavam `valor_epe` como forma alternativa de registrar recursos de TED antes de existir o módulo TED — `bolsas` nesses acordos guarda `valor_cnpq + valor_epe` de propósito, dado correto pra época (confirmado por Igor). Esses 6 registros **não foram alterados**; o alerta `alerta_nds` é isento pra qualquer acordo com "TED" no nome (checagem `'TED' in nome.upper()`), isenção temporária a ser removida quando esses acordos legados forem descontinuados/migrados pro módulo TED de verdade |
 | C6 | Inserir campo pra vincular número de TED (inverso do item A6, mesma ideia do B14) |
 | C7 | BI Acordos: filtro por coordenação + quadro por coordenação |
 | C8 | BI Acordos: filtro "órgão de origem" — siglas |

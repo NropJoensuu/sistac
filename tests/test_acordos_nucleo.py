@@ -163,3 +163,103 @@ def test_cria_acordo_get_responde_200(client, app):
     _login(client, user_id)
     resp = client.get("/acordos/criar")
     assert resp.status_code == 200
+
+
+def test_criar_acordo_alerta_nds_nao_dispara_quando_bate_com_valor_cnpq(app):
+    """
+    Regressão do bug C5: Capital/Custeio/Bolsas são exclusivos do CNPq (não
+    incluem valor_epe), mas o alerta comparava a soma contra
+    valor_cnpq + valor_epe. Um acordo com capital+custeio+bolsas ==
+    valor_cnpq (sem EP) disparava alerta_nds incorretamente.
+    """
+    with app.app_context():
+        user = User.query.filter_by(email='admin@teste.com').first()
+        if user is None:
+            user = User(
+                email='admin@teste.com', username='adminteste',
+                plaintext_password='senha123', coord='DPI', role='admin',
+                ativo=1, sversion=1, cargo_func='teste',
+                trab_conv=1, trab_acordo=1, trab_instru=1,
+                despacha0=0, despacha=0, despacha2=0,
+            )
+            db.session.add(user)
+            db.session.commit()
+
+        acordo_existente = Acordo.query.filter_by(sei='00000.000000/2024-33').first()
+        if acordo_existente is not None:
+            assert acordo_existente.capital + acordo_existente.custeio + acordo_existente.bolsas == acordo_existente.valor_cnpq
+            return
+
+        acordo, alerta_nds = services.criar_acordo(
+            nome='Acordo Teste AlertaNDS Regressao', desc='teste', sei='00000.000000/2024-33',
+            epe='EPE', uf='DF', data_inicio=date(2024, 1, 1), data_fim=date(2026, 12, 31),
+            valor_cnpq_str='100.000,00', valor_epe_str='50.000,00', unid='DPI',
+            situacao='Assinado', capital_str='40.000,00', custeio_str='30.000,00',
+            bolsas_str='30.000,00', siafi='999', usuario_id=user.id,
+        )
+
+        assert alerta_nds is None
+
+
+def test_atualizar_acordo_alerta_nds_nao_dispara_quando_bate_com_valor_cnpq(app):
+    """Mesma regressão do bug C5, agora em atualizar_acordo."""
+    with app.app_context():
+        user = User.query.filter_by(email='admin@teste.com').first()
+
+        acordo = Acordo.query.filter_by(sei='00000.000000/2024-44').first()
+        if acordo is None:
+            acordo = Acordo(
+                nome='Acordo Teste AtualizarAlertaNDS', desc='teste', sei='00000.000000/2024-44',
+                epe='EPE Teste', uf='DF', data_inicio=date(2024, 1, 1), data_fim=date(2026, 12, 31),
+                valor_cnpq=100000.0, valor_epe=50000.0, unidade_cnpq='DPI', situ='Assinado',
+                capital=0.0, custeio=0.0, bolsas=0.0, siafi='444',
+            )
+            db.session.add(acordo)
+            db.session.commit()
+
+        _, alerta_nds = services.atualizar_acordo(
+            acordo.id, nome='Acordo Teste AtualizarAlertaNDS', sei='00000.000000/2024-44',
+            epe='EPE Teste', uf='DF', data_inicio=date(2024, 1, 1), data_fim=date(2026, 12, 31),
+            valor_cnpq_str='100.000,00', valor_epe_str='50.000,00', unid='DPI',
+            situacao='Assinado', desc='teste', capital_str='40.000,00',
+            custeio_str='30.000,00', bolsas_str='30.000,00', siafi='444', usuario_id=user.id,
+        )
+
+        assert alerta_nds is None
+
+
+def test_criar_acordo_com_ted_no_nome_nao_dispara_alerta_nds(app):
+    """
+    Isenção temporária (decisão de Igor): acordos legados com "TED" no nome
+    usavam valor_epe como forma alternativa de registrar recursos de TED
+    antes de existir o módulo TED — Bolsas guarda valor_cnpq + valor_epe de
+    propósito nesses casos, não deve disparar alerta_nds mesmo não batendo
+    com valor_cnpq sozinho.
+    """
+    with app.app_context():
+        user = User.query.filter_by(email='admin@teste.com').first()
+        if user is None:
+            user = User(
+                email='admin@teste.com', username='adminteste',
+                plaintext_password='senha123', coord='DPI', role='admin',
+                ativo=1, sversion=1, cargo_func='teste',
+                trab_conv=1, trab_acordo=1, trab_instru=1,
+                despacha0=0, despacha=0, despacha2=0,
+            )
+            db.session.add(user)
+            db.session.commit()
+
+        acordo_existente = Acordo.query.filter_by(sei='00000.000000/2024-56').first()
+        if acordo_existente is not None:
+            assert 'TED' in acordo_existente.nome.upper()
+            return
+
+        acordo, alerta_nds = services.criar_acordo(
+            nome='ProfixJD-Teste - TED', desc='teste', sei='00000.000000/2024-56',
+            epe='EPE', uf='DF', data_inicio=date(2024, 1, 1), data_fim=date(2026, 12, 31),
+            valor_cnpq_str='0,00', valor_epe_str='40.000.000,00', unid='DPI',
+            situacao='Vigente', capital_str='0,00', custeio_str='0,00',
+            bolsas_str='40.000.000,00', siafi='555', usuario_id=user.id,
+        )
+
+        assert alerta_nds is None

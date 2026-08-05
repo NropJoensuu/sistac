@@ -6,7 +6,7 @@
     {% set nova_dir = 'desc' if (sort == campo and direcao == 'asc') else 'asc' %}
     {% set args = request.args.to_dict() %}
     {% set _ = args.update({'sort': campo, 'dir': nova_dir, 'page': 1}) %}
-    <a href="{{ url_for('ted.gestao', **args) }}" class="text-white">{{ texto }}{% if sort == campo %} {{ '▲' if direcao == 'asc' else '▼' }}{% endif %}</a>
+    <a href="{{ url_for('ted.gestao', **args) }}" class="text-dark">{{ texto }}{% if sort == campo %} {{ '▲' if direcao == 'asc' else '▼' }}{% endif %}</a>
   {% endmacro %}
 
   <div class="card border-primary mb-3">

@@ -1479,16 +1479,26 @@ def atualizar_acordo(acordo_id, nome, sei, epe, uf, data_inicio, data_fim, valor
     custeio = float(custeio_str.replace('.', '').replace(',', '.'))
     bolsas = float(bolsas_str.replace('.', '').replace(',', '.'))
 
-    valor = valor_cnpq + valor_epe
+    # Capital/Custeio/Bolsas são exclusivamente do CNPq, não incluem valor_epe (confirmado por Igor)
+    valor = valor_cnpq
     nds = capital + custeio + bolsas
 
+    # Isenção temporária (decisão de Igor, ver proposta_melhorias.md): os acordos
+    # legados com "TED" no nome (ex: "ProfixJD-2022 - TED", "Centelha 2021 - TED")
+    # usavam valor_epe como forma alternativa de registrar recursos de TED antes de
+    # existir o módulo TED/TED_Vinculo_Instrumento — Bolsas nesses acordos guarda
+    # valor_cnpq + valor_epe de propósito, não é erro de preenchimento. Não isentar
+    # esses acordos dispararia alerta_nds para dado legado correto para a época.
+    # Remover quando esses acordos legados forem descontinuados/migrados para o
+    # módulo TED de verdade.
     alerta_nds = None
-    if round(nds, 2) != round(valor, 2) and (capital > 0 or custeio > 0 or bolsas > 0):
-        alerta_nds = (
-            'Atenção: Soma Capital, Custeio e Bolsas não corresponde à soma dos valores do acordo/TED '
-            '(Aporte: ' + locale.currency(round(valor, 2), symbol=False, grouping=True) +
-            ', Soma NDs: ' + locale.currency(round(nds, 2), symbol=False, grouping=True) + ')!'
-        )
+    if 'TED' not in nome.upper():
+        if round(nds, 2) != round(valor, 2) and (capital > 0 or custeio > 0 or bolsas > 0):
+            alerta_nds = (
+                'Atenção: Soma Capital, Custeio e Bolsas não corresponde ao Valor CNPq do acordo/TED '
+                '(Valor CNPq: ' + locale.currency(round(valor, 2), symbol=False, grouping=True) +
+                ', Soma NDs: ' + locale.currency(round(nds, 2), symbol=False, grouping=True) + ')!'
+            )
 
     sei_anterior = acordo.sei
 
@@ -1537,16 +1547,26 @@ def criar_acordo(nome, desc, sei, epe, uf, data_inicio, data_fim, valor_cnpq_str
     custeio = float(custeio_str.replace('.', '').replace(',', '.'))
     bolsas = float(bolsas_str.replace('.', '').replace(',', '.'))
 
-    valor = valor_cnpq + valor_epe
+    # Capital/Custeio/Bolsas são exclusivamente do CNPq, não incluem valor_epe (confirmado por Igor)
+    valor = valor_cnpq
     nds = capital + custeio + bolsas
 
+    # Isenção temporária (decisão de Igor, ver proposta_melhorias.md): os acordos
+    # legados com "TED" no nome (ex: "ProfixJD-2022 - TED", "Centelha 2021 - TED")
+    # usavam valor_epe como forma alternativa de registrar recursos de TED antes de
+    # existir o módulo TED/TED_Vinculo_Instrumento — Bolsas nesses acordos guarda
+    # valor_cnpq + valor_epe de propósito, não é erro de preenchimento. Não isentar
+    # esses acordos dispararia alerta_nds para dado legado correto para a época.
+    # Remover quando esses acordos legados forem descontinuados/migrados para o
+    # módulo TED de verdade.
     alerta_nds = None
-    if round(nds, 2) != round(valor, 2) and (capital != 0 or custeio != 0 or bolsas != 0):
-        alerta_nds = (
-            'Atenção: Soma Capital, Custeio e Bolsas não corresponde à soma dos valores do acordo/TED '
-            '(Aporte: ' + locale.currency(round(valor, 2), symbol=False, grouping=True) +
-            ', Soma NDs: ' + locale.currency(round(nds, 2), symbol=False, grouping=True) + ')!'
-        )
+    if 'TED' not in nome.upper():
+        if round(nds, 2) != round(valor, 2) and (capital != 0 or custeio != 0 or bolsas != 0):
+            alerta_nds = (
+                'Atenção: Soma Capital, Custeio e Bolsas não corresponde ao Valor CNPq do acordo/TED '
+                '(Valor CNPq: ' + locale.currency(round(valor, 2), symbol=False, grouping=True) +
+                ', Soma NDs: ' + locale.currency(round(nds, 2), symbol=False, grouping=True) + ')!'
+            )
 
     acordo = Acordo(
         nome=nome, desc=desc, sei=sei, epe=epe, uf=uf,

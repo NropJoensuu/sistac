@@ -138,8 +138,14 @@
         {{ render_field(form.bolsas,class="form-control",placeholder="0,0",obr=True) }}
         {% if pago_bolsas != 0 %} {{ pago_bolsas|converte_para_real }} {% endif %}
       </div>
-    </div>  
+    </div>
 
+  </div>
+
+  <div class="form-row">
+    <div class="col-6 offset-5">
+      <small id="capitalCusteioBolsasHelp" class="form-text text-muted">Capital, Custeio e Bolsas são valores exclusivos do CNPq — não somam com o Valor EP.</small>
+    </div>
   </div>
 
   <div class="row justify-content-around">
