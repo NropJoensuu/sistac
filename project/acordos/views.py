@@ -81,6 +81,7 @@ from project.acordos.forms import AcordoForm, Programa_CNPqForm, func_ProcMae_Ac
 from project.demandas.views import registra_log_auto
 from project.core.services import consultaDW, chamadas_DW
 from project.acordos import services
+from project.ted import services as ted_services
 
 import locale
 import datetime
@@ -236,7 +237,55 @@ def update(acordo_id,lista):
                             cont_cham=dados['qtd_cha'],
                             pago_capital=dados['pago_capital'],
                             pago_custeio=dados['pago_custeio'],
-                            pago_bolsas=dados['pago_bolsas'])
+                            pago_bolsas=dados['pago_bolsas'],
+                            teds_vinculados=ted_services.teds_vinculados('acordo', id_acordo=acordo_id),
+                            teds_choices=ted_services.teds_choices())
+
+
+### Vincular/desvincular TED a um Acordo (itens A6/C6 do backlog: vincular só a
+### partir daqui, nunca da tela de TED — o TED pode financiar vários Acordos)
+
+@acordos.route("/<int:acordo_id>/vincula_ted", methods=['POST'])
+@login_required
+def vincula_ted(acordo_id):
+    """
+    +---------------------------------------------------------------------------------------+
+    |Vincula um TED (Termo de Execução Descentralizada) já carregado no SISTAC a este       |
+    |Acordo — curadoria manual (services.vincular_instrumento do módulo TED).               |
+    +---------------------------------------------------------------------------------------+
+    """
+    Acordo.query.get_or_404(acordo_id)
+
+    id_plano_acao = request.form.get('id_plano_acao', type=int)
+    if not id_plano_acao:
+        flash('Escolha um TED válido na lista antes de vincular.', 'perigo')
+        return redirect(url_for('acordos.update', acordo_id=acordo_id, lista='todos'))
+
+    ted_services.vincular_instrumento(
+        id_plano_acao=id_plano_acao,
+        tipo_instrumento='acordo',
+        nr_convenio=None,
+        id_acordo=acordo_id,
+        usuario_id=current_user.id,
+    )
+    flash('TED vinculado ao Acordo!', 'sucesso')
+    return redirect(url_for('acordos.update', acordo_id=acordo_id, lista='todos'))
+
+
+@acordos.route("/<int:acordo_id>/<int:id_vinculo>/desvincula_ted", methods=['POST'])
+@login_required
+def desvincula_ted(acordo_id, id_vinculo):
+    """
+    +---------------------------------------------------------------------------------------+
+    |Remove um vínculo TED-Acordo específico (não afeta os demais TEDs vinculados a este    |
+    |mesmo Acordo, nem vínculos de outros Acordos/Convênios ao mesmo TED).                  |
+    +---------------------------------------------------------------------------------------+
+    """
+    ted_services.desvincular_instrumento(id_vinculo, current_user.id)
+    flash('TED desvinculado do Acordo!', 'sucesso')
+    return redirect(url_for('acordos.update', acordo_id=acordo_id, lista='todos'))
+
+
 # lista acordo de associado a um processo-mãe
 @acordos.route("/<int:proc_mae_id>/consulta_acordo_proc_mae")
 @login_required

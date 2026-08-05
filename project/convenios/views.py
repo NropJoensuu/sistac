@@ -45,6 +45,7 @@ from flask import render_template,url_for,flash, redirect,request,Blueprint
 from flask_login import current_user,login_required
 from project.convenios.forms import SEIForm, ProgPrefForm, ListaForm, NDForm, ChamadaConvForm
 from project.convenios import services
+from project.ted import services as ted_services
 from project.models import Sistema
 
 
@@ -187,7 +188,52 @@ def convenio_detalhes(conv):
 
     services.gerar_pdf_convenio(conv, dados)
 
-    return render_template('convenio_detalhes.html', form=form, **dados)
+    return render_template('convenio_detalhes.html', form=form,
+                            teds_vinculados=ted_services.teds_vinculados('convenio', nr_convenio=conv),
+                            teds_choices=ted_services.teds_choices(),
+                            **dados)
+
+
+### Vincular/desvincular TED a um Convênio (itens A6/B14 do backlog: vincular só a
+### partir daqui, nunca da tela de TED — o TED pode financiar vários Convênios)
+
+@convenios.route("/<conv>/vincula_ted", methods=['POST'])
+@login_required
+def vincula_ted(conv):
+    """
+    +---------------------------------------------------------------------------------------+
+    |Vincula um TED (Termo de Execução Descentralizada) já carregado no SISTAC a este       |
+    |Convênio — curadoria manual (services.vincular_instrumento do módulo TED).             |
+    +---------------------------------------------------------------------------------------+
+    """
+    id_plano_acao = request.form.get('id_plano_acao', type=int)
+    if not id_plano_acao:
+        flash('Escolha um TED válido na lista antes de vincular.', 'perigo')
+        return redirect(url_for('convenios.convenio_detalhes', conv=conv))
+
+    ted_services.vincular_instrumento(
+        id_plano_acao=id_plano_acao,
+        tipo_instrumento='convenio',
+        nr_convenio=conv,
+        id_acordo=None,
+        usuario_id=current_user.id,
+    )
+    flash('TED vinculado ao Convênio!', 'sucesso')
+    return redirect(url_for('convenios.convenio_detalhes', conv=conv))
+
+
+@convenios.route("/<conv>/<int:id_vinculo>/desvincula_ted", methods=['POST'])
+@login_required
+def desvincula_ted(conv, id_vinculo):
+    """
+    +---------------------------------------------------------------------------------------+
+    |Remove um vínculo TED-Convênio específico (não afeta os demais TEDs vinculados a este  |
+    |mesmo Convênio, nem vínculos de outros Acordos/Convênios ao mesmo TED).                |
+    +---------------------------------------------------------------------------------------+
+    """
+    ted_services.desvincular_instrumento(id_vinculo, current_user.id)
+    flash('TED desvinculado do Convênio!', 'sucesso')
+    return redirect(url_for('convenios.convenio_detalhes', conv=conv))
 
 
 ### associar chamada a Convênio

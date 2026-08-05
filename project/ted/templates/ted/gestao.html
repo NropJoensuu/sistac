@@ -144,12 +144,12 @@
                   {% endif %}
                 </td>
                 <td>
-                  {% if item.instrumento %}
-                    <span class="badge badge-success">
-                      {% if item.instrumento.tipo_instrumento == 'convenio' %}Convênio {{ item.instrumento.nr_convenio }}{% else %}Acordo #{{ item.instrumento.id_acordo }}{% endif %}
-                    </span>
+                  {% if item.instrumentos %}
+                    {% for rotulo in item.instrumentos %}
+                      <span class="badge badge-success d-block mb-1" style="width:fit-content">{{ rotulo }}</span>
+                    {% endfor %}
                   {% else %}
-                    <a href="{{ url_for('ted.vincula_instrumento', id_plano_acao=plano.id) }}" class="badge badge-light border">Nenhum</a>
+                    <span class="badge badge-light border">Nenhum</span>
                   {% endif %}
                 </td>
               </tr>

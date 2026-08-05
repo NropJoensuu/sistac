@@ -12,14 +12,23 @@
     * Dispara a carga a partir da API do TransfereGov: carrega
     * Registra execução interna (coordenação/SEI) de um TED: registra_execucao
     * Vincula um TED a um Programa CNPq: vincula_programa_cnpq
-    * Vincula um TED a um Convênio ou Acordo existente: vincula_instrumento
+
+    O vínculo de um TED a um Convênio/Acordo existente (curadoria manual,
+    services.vincular_instrumento/desvincular_instrumento/teds_vinculados/
+    teds_choices) é feito a partir da tela de Convênio/Acordo, nunca daqui
+    — decisão de Igor (ver proposta_melhorias.md, itens A6/B14/C6): o TED
+    pode financiar até 27 Acordos/Convênios, então o caminho natural é
+    vincular a partir de quem está sendo financiado, não o inverso. A
+    antiga rota /ted/<id>/vincula_instrumento (formulário que pedia o id
+    cru do Acordo/Convênio) foi removida por virar código morto depois
+    dessa mudança.
 """
 
 from flask import render_template, url_for, flash, redirect, request, Blueprint, abort
 from flask_login import current_user, login_required
 
 from project.ted import services
-from project.ted.forms import ExecucaoInternaForm, VinculoProgramaCNPqForm, VinculoInstrumentoForm
+from project.ted.forms import ExecucaoInternaForm, VinculoProgramaCNPqForm
 from project.models import TED_PlanoAcao, Sistema
 
 
@@ -156,36 +165,6 @@ def vincula_programa_cnpq(id_plano_acao):
         return redirect(url_for('ted.gestao'))
 
     return render_template('vincula_programa_cnpq.html', form=form, plano=plano)
-
-
-@ted.route('/<int:id_plano_acao>/vincula_instrumento', methods=['GET', 'POST'])
-@login_required
-def vincula_instrumento(id_plano_acao):
-    """
-    +---------------------------------------------------------------------------------------+
-    |Vincula um TED a um Convênio ou Acordo já existente no SISTAC (curadoria manual — não  |
-    |há chave comum entre os sistemas para automatizar).                                    |
-    +---------------------------------------------------------------------------------------+
-    """
-    plano = TED_PlanoAcao.query.get_or_404(id_plano_acao)
-
-    form = VinculoInstrumentoForm()
-
-    if form.validate_on_submit():
-        nr_convenio = form.identificador.data if form.tipo_instrumento.data == 'convenio' else None
-        id_acordo = int(form.identificador.data) if form.tipo_instrumento.data == 'acordo' else None
-
-        services.vincular_instrumento(
-            id_plano_acao=id_plano_acao,
-            tipo_instrumento=form.tipo_instrumento.data,
-            nr_convenio=nr_convenio,
-            id_acordo=id_acordo,
-            usuario_id=current_user.id,
-        )
-        flash('Instrumento vinculado!', 'sucesso')
-        return redirect(url_for('ted.gestao'))
-
-    return render_template('vincula_instrumento.html', form=form, plano=plano)
 
 
 @ted.route('/bi_ted')

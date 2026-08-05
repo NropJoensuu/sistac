@@ -212,6 +212,9 @@
             <div class="col">
               <button type="button" class="btn btn-success" data-toggle='modal' data-target='#pag_modal'>Pagamentos</button>
             </div>
+            <div class="col">
+              <button type="button" class="btn btn-secondary" data-toggle='modal' data-target='#teds_modal'>TEDs Vinculados{% if teds_vinculados %} ({{ teds_vinculados|length }}){% endif %}</button>
+            </div>
             <div class = "col">
               <p align="right"><a href=/static/convenio.pdf class="btn btn-outline-primary" role="button" aria-pressed="true">PDF</a></p>
             </div>
@@ -270,6 +273,83 @@
     </div>
   </div>
 </div>
+
+{# modal para TEDs vinculados ao Convênio (curadoria manual, vínculo N:N — itens A6/B14) #}
+
+<div class="modal fade" tabindex="-1" role="dialog" id="teds_modal">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">TEDs Vinculados a este Convênio</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <table class="table table-striped table-hover table-sm">
+          <thead>
+            <tr>
+              <th scope="col">TED</th>
+              <th scope="col">Objeto</th>
+              <th scope="col"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in teds_vinculados %}
+              <tr>
+                <td>
+                  {% if item.plano and item.plano.numero_ted %}TED {{ item.plano.numero_ted }}
+                  {% elif item.plano %}Plano {{ item.plano.id }}
+                  {% else %}Plano {{ item.vinculo.id_plano_acao }} <span class="text-muted">(não encontrado na última carga)</span>
+                  {% endif %}
+                </td>
+                <td style="max-width:320px">
+                  {% if item.plano and item.plano.objeto %}{{ item.plano.objeto[:120] }}{% if item.plano.objeto|length > 120 %}…{% endif %}{% endif %}
+                </td>
+                <td>
+                  <form action="{{ url_for('convenios.desvincula_ted', conv=convenio.NR_CONVENIO, id_vinculo=item.vinculo.id) }}" method="post">
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Desvincular</button>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="3" class="text-center text-muted">Nenhum TED vinculado a este Convênio.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-footer d-block">
+        <form action="{{ url_for('convenios.vincula_ted', conv=convenio.NR_CONVENIO) }}" method="post" class="form-inline w-100">
+          <input type="text" class="form-control mr-2" style="flex:1 1 auto;min-width:280px" id="ted_busca_convenio" list="teds_datalist_convenio" placeholder="Buscar TED por número ou objeto…" autocomplete="off">
+          <datalist id="teds_datalist_convenio">
+            {% for t in teds_choices %}
+              <option data-id="{{ t.id }}" value="{{ t.label }}">
+            {% endfor %}
+          </datalist>
+          <input type="hidden" name="id_plano_acao" id="id_plano_acao_hidden_convenio">
+          <button type="submit" class="btn btn-primary">Vincular</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    var input = document.getElementById('ted_busca_convenio');
+    var hidden = document.getElementById('id_plano_acao_hidden_convenio');
+    var datalist = document.getElementById('teds_datalist_convenio');
+    if (input && hidden && datalist) {
+      input.addEventListener('input', function() {
+        var opts = datalist.options;
+        hidden.value = '';
+        for (var i = 0; i < opts.length; i++) {
+          if (opts[i].value === input.value) { hidden.value = opts[i].dataset.id; break; }
+        }
+      });
+    }
+  })();
+</script>
 
 {# modal para visualizar cronograma de desembolso #}
 

@@ -59,7 +59,7 @@ final desta seção, uma sugestão minha de sequenciamento dentro disso.
 | A3 | Gestão TED: separar coluna "Vigência" em duas — início e fim |
 | A4 | Gestão TED: colorir "Vigência fim" com o mesmo padrão de Convênios/Acordos (cinza a 90 dias do fim, amarelo a 60, vermelho a 30) |
 | A5 | Gestão TED: instituições devem aparecer pela sigla, não nome completo |
-| A6 | Gestão TED: vínculo de Acordo/Convênio só permite 1 por vez, mas um TED pode ter até 27 — e o campo pede um ID que o usuário não tem acesso. **Decisão de Igor: não permitir vincular Acordo/Convênio pela tela de TED — o caminho é o inverso** (vincular TED a partir da tela de Acordo/Convênio, ver itens B14 e C6 abaixo) |
+| A6 | ✅ Gestão TED: vínculo de Acordo/Convênio só permitia 1 por vez (bug real: `vincular_instrumento` sobrescrevia por `id_plano_acao`, e `listar_teds()` guardava só 1 vínculo por TED num dict — os demais eram descartados silenciosamente), mas um TED pode ter até 27, segundo Igor. Corrigido: `vincular_instrumento` sempre cria uma linha nova (mesmo padrão de `registrar_execucao_interna`); `listar_teds()` retorna uma lista `instrumentos` por TED. **Decisão de Igor aplicada**: não é mais possível vincular Acordo/Convênio pela tela de TED — a antiga rota `/ted/<id>/vincula_instrumento` (formulário que pedia o id cru) foi removida por virar código morto; a coluna de instrumentos na Gestão de TED agora é só leitura (badges com SEI/nº do Convênio, uma por vínculo). O caminho passou a ser o inverso — ver itens B14 e C6 |
 | A7 | BI TED: filtro por coordenação + quadro por coordenação |
 | A8 | BI TED: filtro "órgão de origem" — usar siglas, não nome completo |
 | A9 | BI TED: filtro "Ano" — trocar pro ano de início de vigência, ou tooltip explicando o que o filtro atual representa |
@@ -81,7 +81,7 @@ final desta seção, uma sugestão minha de sequenciamento dentro disso.
 | B11 | BI Convênios: filtro "órgão de origem" — siglas, não nome completo |
 | B12 | BI Convênios: filtro "Ano" — ano de início de vigência, ou tooltip |
 | B13 | Gestão → Lista de Convênios: filtros no mesmo padrão da Gestão de TED |
-| B14 | Gestão → Lista de Convênios → Convênio: campo pra vincular um TED a esse convênio (inverso do item A6) |
+| B14 | ✅ Gestão → Lista de Convênios → Convênio: seção "TEDs Vinculados" (modal) na tela de detalhes do Convênio (`convenio_detalhes.html`) — lista os TEDs já vinculados (com opção de desvincular) e um campo de busca (texto + `<datalist>` nativo do HTML5, sem lib nova) mostrando "TED nº — início do objeto" em vez do id cru, pra vincular um novo. Chama `ted.services.vincular_instrumento`/`desvincular_instrumento` diretamente (mesmo padrão já usado em `acordos/views.py` importando `core.services`) |
 
 ### C. Acordos
 
@@ -92,7 +92,7 @@ final desta seção, uma sugestão minha de sequenciamento dentro disso.
 | C3 | Renomear "Lista de Acordos/TEDs" → "Lista de Acordos" |
 | C4 | Renomear "Inserir detalhes de um Acordo/TED" → "Inserir detalhes de um Acordo" |
 | C5 | ✅ **Bug de dado**: campos Capital/Custeio/Bolsas em Acordo pertencem só ao CNPq — a fórmula comparava contra Valor CNPq + Valor EP indevidamente. Corrigido em `criar_acordo`/`atualizar_acordo` (`project/acordos/services.py`) pra comparar só contra Valor CNPq; tooltip adicionado em `add_acordo.html`. **Exceção documentada**: 6 acordos reais legados com "TED" no nome (ex: "ProfixJD-2022 - TED", "Centelha 2021 - TED", "PPP, PRONEM e PRONEX - TED") usavam `valor_epe` como forma alternativa de registrar recursos de TED antes de existir o módulo TED — `bolsas` nesses acordos guarda `valor_cnpq + valor_epe` de propósito, dado correto pra época (confirmado por Igor). Esses 6 registros **não foram alterados**; o alerta `alerta_nds` é isento pra qualquer acordo com "TED" no nome (checagem `'TED' in nome.upper()`), isenção temporária a ser removida quando esses acordos legados forem descontinuados/migrados pro módulo TED de verdade |
-| C6 | Inserir campo pra vincular número de TED (inverso do item A6, mesma ideia do B14) |
+| C6 | ✅ Inserir campo pra vincular número de TED — mesmo padrão do item B14 (seção "TEDs Vinculados" em modal, dentro de `add_acordo.html`, com busca por `<datalist>` em vez de id cru) |
 | C7 | BI Acordos: filtro por coordenação + quadro por coordenação |
 | C8 | BI Acordos: filtro "órgão de origem" — siglas |
 | C9 | BI Acordos: filtro "Ano" — ano de início de vigência, ou tooltip |
@@ -160,15 +160,20 @@ pontuais dali em diante. Fica a critério de Igor.
 A ordem por módulo (TED → Convênios → Acordos) faz sentido e mantenho.
 Duas sugestões de ajuste **dentro** dessa ordem:
 
-1. **Adiantar os dois itens que são bugs de verdade, não só polimento**:
+1. ✅ **Adiantar os dois itens que são bugs de verdade, não só polimento**:
    A2 (texto branco ilegível) e C5 (Capital/Custeio/Bolsas somando EP
-   indevidamente — esse em especial pode estar afetando dado já salvo,
-   vale conferir com prioridade). São baratos de corrigir e o C5 tem risco
-   de dado incorreto se não for tratado logo.
-2. **Fazer A6/B14/C6 como um bloco só**, já que são as três pontas do
+   indevidamente). Feito.
+2. ✅ **Fazer A6/B14/C6 como um bloco só**, já que são as três pontas do
    mesmo relacionamento (vincular TED a partir de Convênio/Acordo, não o
-   inverso) — separar isso em três tarefas despachadas em momentos
-   diferentes arrisca inconsistência entre elas.
+   inverso). Feito — `vincular_instrumento`/`desvincular_instrumento`/
+   `teds_vinculados`/`teds_choices` em `project/ted/services.py`, telas
+   novas em `add_acordo.html` e `convenio_detalhes.html`, rota antiga
+   `/ted/<id>/vincula_instrumento` removida. Achado lateral corrigido de
+   quebra: a ordenação padrão de `listar_teds()` (só por `ano`, sem
+   tiebreaker) deixava a paginação instável quando havia empate — um
+   teste (`test_paginacao_segunda_pagina_traz_o_restante`) capturou isso
+   depois que outro teste da suíte reescreveu a tabela de TED numa ordem
+   diferente; corrigido com um tiebreaker por `id`.
 
 Fora isso, a ordem proposta está boa — trato como confirmada, a menos que
 você quera ajustar.

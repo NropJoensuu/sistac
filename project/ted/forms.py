@@ -7,7 +7,11 @@
 
    * ExecucaoInternaForm: registra coordenação/SEI de uma execução do TED pelo CNPq.
    * VinculoProgramaCNPqForm: associa o TED a um Programa CNPq.
-   * VinculoInstrumentoForm: associa o TED a um Convênio ou Acordo já existente.
+
+   O vínculo a Convênio/Acordo (antiga VinculoInstrumentoForm, removida
+   por virar código morto) agora é feito pelas telas de Convênio/Acordo,
+   com um form HTML simples (sem WTForms dedicado — só um campo de busca
+   + hidden, processados direto em request.form nas rotas vincula_ted).
 """
 
 from flask_wtf import FlaskForm
@@ -32,13 +36,5 @@ class VinculoProgramaCNPqForm(FlaskForm):
         ('tema_funcional', 'Tema/função (sem nome explícito)'),
         ('curadoria_manual', 'Curadoria manual, sem pista textual'),
     ])
-
-    submit = SubmitField('Vincular')
-
-
-class VinculoInstrumentoForm(FlaskForm):
-
-    tipo_instrumento = SelectField('Tipo:', choices=[('convenio', 'Convênio'), ('acordo', 'Acordo')])
-    identificador     = StringField('Número do Convênio ou id do Acordo:', validators=[DataRequired(message="Informe o identificador!")])
 
     submit = SubmitField('Vincular')

@@ -21,6 +21,7 @@ from project import db, app, sched
 from project.models import (
     TED_Programa, TED_PlanoAcao, TED_TermoExecucao, TED_Execucao_Interna,
     TED_Vinculo_ProgramaCNPq, TED_Vinculo_Instrumento, TED_Carga_Status, Programa_CNPq, Coords,
+    Acordo,
 )
 from project.convenios.services import cria_csv
 
@@ -218,7 +219,12 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
             TED_PlanoAcao.objeto.ilike(termo),
         ))
 
-    linhas = query.order_by(TED_PlanoAcao.ano.desc()).all()
+    # tiebreaker por id: sem ele, empates em 'ano' (a maioria dos TEDs, já que
+    # há poucos anos distintos) deixam a ordem entre duas execuções da mesma
+    # query sujeita ao plano de execução do Postgres — não garantida estável.
+    # Bug real encontrado via teste: paginação podia repetir/pular TEDs entre
+    # página 1 e 2 quando isso acontecia.
+    linhas = query.order_by(TED_PlanoAcao.ano.desc(), TED_PlanoAcao.id.asc()).all()
 
     ids_plano = [p.id for p, _ in linhas]
     situacoes_termo = {
@@ -236,10 +242,21 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
         for e in TED_Execucao_Interna.query.filter(TED_Execucao_Interna.id_plano_acao.in_(ids_plano)).all():
             execucoes_por_plano.setdefault(e.id_plano_acao, []).append(e)
 
-    instrumentos_vinculados = {
-        v.id_plano_acao: v
-        for v in TED_Vinculo_Instrumento.query.filter(TED_Vinculo_Instrumento.id_plano_acao.in_(ids_plano)).all()
-    } if ids_plano else {}
+    # Bug real corrigido: a versão antiga guardava um dict {id_plano_acao: vinculo},
+    # descartando silenciosamente qualquer vínculo além do primeiro — um TED pode
+    # financiar vários Acordos/Convênios (até 27, segundo Igor). Agora é uma lista
+    # por TED, mesmo padrão de execucoes_por_plano acima.
+    instrumentos_por_plano = {}
+    if ids_plano:
+        for v in TED_Vinculo_Instrumento.query.filter(TED_Vinculo_Instrumento.id_plano_acao.in_(ids_plano)).all():
+            instrumentos_por_plano.setdefault(v.id_plano_acao, []).append(v)
+
+    ids_acordo_vinculados = sorted({
+        v.id_acordo for lista in instrumentos_por_plano.values() for v in lista if v.id_acordo
+    })
+    acordos_vinculados = {
+        a.id: a for a in Acordo.query.filter(Acordo.id.in_(ids_acordo_vinculados)).all()
+    } if ids_acordo_vinculados else {}
 
     if filtros.get('programa_cnpq') == 'vinculado':
         linhas = [(p, prog) for p, prog in linhas if p.id in programas_vinculados]
@@ -254,7 +271,21 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
             pc = Programa_CNPq.query.get(vinculo_prog.id_programa_cnpq)
             programa_cnpq_nome = pc.SIGLA_PROGRAMA if pc else None
 
-        instrumento = instrumentos_vinculados.get(plano.id)
+        instrumentos = []
+        for v in instrumentos_por_plano.get(plano.id, []):
+            if v.tipo_instrumento == 'acordo':
+                acordo = acordos_vinculados.get(v.id_acordo)
+                # identificador real do Acordo é o SEI (ver item C2 do backlog), não o id interno
+                if acordo and acordo.sei:
+                    rotulo = f"Acordo {acordo.sei}"
+                elif acordo:
+                    rotulo = f"Acordo {acordo.nome}"
+                else:
+                    rotulo = f"Acordo #{v.id_acordo}"
+            else:
+                rotulo = f"Convênio {v.nr_convenio}"
+            instrumentos.append(rotulo)
+
         execucoes = execucoes_por_plano.get(plano.id, [])
         coordenacoes = sorted({e.coordenacao for e in execucoes if e.coordenacao})
 
@@ -265,7 +296,7 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
             'programa_cnpq_nome': programa_cnpq_nome,
             'execucoes': execucoes,
             'coordenacoes': coordenacoes,
-            'instrumento': instrumento,
+            'instrumentos': instrumentos,
         })
 
     if sort in _CHAVES_ORDENACAO:
@@ -356,24 +387,69 @@ def vincular_programa_cnpq(id_plano_acao, id_programa_cnpq, tipo_evidencia, usua
 
 
 def vincular_instrumento(id_plano_acao, tipo_instrumento, nr_convenio, id_acordo, usuario_id):
-    """Vincula (ou atualiza) um TED a um Convênio ou Acordo já existente — curadoria manual."""
-    existente = TED_Vinculo_Instrumento.query.filter_by(id_plano_acao=id_plano_acao).first()
-    if existente:
-        existente.tipo_instrumento = tipo_instrumento
-        existente.nr_convenio = nr_convenio
-        existente.id_acordo = id_acordo
-        existente.usuario_curador_id = usuario_id
-        existente.data_vinculo = dt.datetime.now()
-    else:
-        db.session.add(TED_Vinculo_Instrumento(
-            id_plano_acao=id_plano_acao,
-            tipo_instrumento=tipo_instrumento,
-            nr_convenio=nr_convenio,
-            id_acordo=id_acordo,
-            usuario_curador_id=usuario_id,
-            data_vinculo=dt.datetime.now(),
-        ))
+    """
+    Vincula um TED a um Convênio ou Acordo já existente — curadoria manual.
+    Sempre cria uma linha nova (mesmo padrão de registrar_execucao_interna):
+    um TED pode financiar vários Acordos/Convênios (até 27, segundo Igor).
+
+    Corrige bug real: a versão antiga buscava um vínculo existente por
+    id_plano_acao e sobrescrevia, permitindo só 1 vínculo por TED — os
+    demais eram perdidos silenciosamente.
+    """
+    db.session.add(TED_Vinculo_Instrumento(
+        id_plano_acao=id_plano_acao,
+        tipo_instrumento=tipo_instrumento,
+        nr_convenio=nr_convenio,
+        id_acordo=id_acordo,
+        usuario_curador_id=usuario_id,
+        data_vinculo=dt.datetime.now(),
+    ))
     db.session.commit()
+
+
+def desvincular_instrumento(id_vinculo, usuario_id):
+    """Remove um vínculo TED-Convênio/Acordo específico (pode haver vários por TED)."""
+    vinculo = TED_Vinculo_Instrumento.query.get_or_404(id_vinculo)
+    db.session.delete(vinculo)
+    db.session.commit()
+
+
+def teds_vinculados(tipo_instrumento, nr_convenio=None, id_acordo=None):
+    """
+    Lista os vínculos de TED_Vinculo_Instrumento pra um Convênio ou Acordo
+    específico (tipo_instrumento='convenio'/'acordo'), com o TED_PlanoAcao
+    correspondente já carregado — usado nas telas de Convênio/Acordo pra
+    mostrar/desvincular os TEDs já associados.
+    """
+    query = TED_Vinculo_Instrumento.query.filter_by(tipo_instrumento=tipo_instrumento)
+    if tipo_instrumento == 'acordo':
+        query = query.filter_by(id_acordo=id_acordo)
+    else:
+        query = query.filter_by(nr_convenio=nr_convenio)
+    vinculos = query.all()
+
+    ids_plano = [v.id_plano_acao for v in vinculos]
+    planos = {
+        p.id: p for p in TED_PlanoAcao.query.filter(TED_PlanoAcao.id.in_(ids_plano)).all()
+    } if ids_plano else {}
+
+    return [{'vinculo': v, 'plano': planos.get(v.id_plano_acao)} for v in vinculos]
+
+
+def teds_choices():
+    """
+    Lista de TEDs pro campo de busca das telas de Acordo/Convênio: rótulo
+    legível (número do TED + início do objeto) em vez do id_plano_acao
+    cru — decisão de Igor, mesmo espírito do item C2 do backlog.
+    """
+    planos = TED_PlanoAcao.query.order_by(TED_PlanoAcao.ano.desc(), TED_PlanoAcao.id.asc()).all()
+    lista = []
+    for p in planos:
+        numero = f"TED {p.numero_ted}" if p.numero_ted else f"Plano {p.id}"
+        objeto = (p.objeto or '')[:60]
+        rotulo = f"{numero} — {objeto}" if objeto else numero
+        lista.append({'id': p.id, 'label': rotulo})
+    return lista
 
 
 def exportar_teds_csv(filtros=None):
