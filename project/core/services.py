@@ -1552,7 +1552,16 @@ def cargaSICONV():
 
         for arquivo in arquivos:
 
-            url = url_base + arquivo + '.zip'
+            # BUG CORRIGIDO: a nova área de download do Transferegov
+            # (URL_SICONV migrado do repositorio.dados.gov.br, desligado
+            # em 31/08/2026 — Comunicado Transferegov nº 23/2026) mudou
+            # o padrão de nome do .zip remoto: antes 'siconv_convenio.
+            # csv.zip', agora 'siconv_convenio.zip' (sem '.csv' antes do
+            # '.zip', confirmado 04/08/2026). O nome LOCAL do arquivo
+            # baixado (variável `arq`, usada depois pra descompactar)
+            # continua igual — só o nome pedido ao servidor remoto muda.
+            nome_remoto = arquivo.replace('.csv', '')
+            url = url_base + nome_remoto + '.zip'
             arq = os.path.normpath(pasta_compactados+'/'+arquivo+'.zip')
 
             urllib.request.urlretrieve (url,arq)

@@ -185,7 +185,7 @@ espaço.
 
 ---
 
-## 9. 🚨 URGENTE — URL do SICONV (repositorio.dados.gov.br) será desligada em 31/08/2026
+## 9. ✅ RESOLVIDO — URL do SICONV (repositorio.dados.gov.br) será desligada em 31/08/2026
 
 Confirmado via Comunicado Transferegov nº 23/2026 (17/07/2026, oficial):
 `http://repositorio.dados.gov.br/seges/detru/` — a URL configurada hoje em
@@ -213,11 +213,22 @@ funcionando:**
 
 **Detalhe técnico importante**: o padrão de nome mudou — antes
 `siconv_convenio.csv.zip`, agora `siconv_convenio.zip` (sem `.csv` antes
-do `.zip`). Isso exige um ajuste pequeno no código (não só trocar a
-variável de ambiente), já passado para o Code corrigir junto — ver
-`prompt_atualiza_url_siconv.txt`. Ainda não confirmado se o nome do
-arquivo *dentro* do zip também mudou (só o nome externo do zip foi
-confirmado).
+do `.zip`). Isso exigiu um ajuste pequeno no código (não só trocar a
+variável de ambiente) — ver `prompt_atualiza_url_siconv.txt`.
+
+**Atualização (05/08/2026): correção aplicada e verificada de ponta a
+ponta.** `cargaSICONV()` (`project/core/services.py`) agora monta a URL
+remota removendo o `.csv` do nome do arquivo antes de pedir o `.zip`
+(`nome_remoto = arquivo.replace('.csv', '')`), mantendo o nome local
+igual (usado depois pra descompactar/ler). Rodei a carga real completa
+contra a URL nova (`https://api-publica.transferegov.gestao.gov.br/downloads/dadosgov/`):
+os 10 arquivos baixaram, descompactaram e carregaram sem erro —
+`Programa: 85, Proposta: 499, Convenio: 362` no banco, `RefSICONV.data_ref`
+atualizado. **Confirmado que o nome do arquivo *dentro* do zip não mudou**
+(continua `siconv_convenio.csv`, etc.) — não foi preciso nenhum ajuste
+adicional na leitura do CSV extraído. Suíte completa (201 testes)
+passando. `URL_SICONV` precisa ser atualizada nas variáveis de ambiente
+de cada ambiente (dev/produção) pra essa nova URL antes de 31/08/2026.
 
 ---
 
