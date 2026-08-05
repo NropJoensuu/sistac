@@ -1,263 +1,174 @@
 # Proposta de Melhorias — sistac
 
-Documento de planejamento, sem código ainda. Organizado por área, com o `users`
-priorizado conforme combinado. Cada item indica o que já sabemos do código hoje e
-qual decisão de produto precisa ser tomada antes de implementar.
+Documento de planejamento e acompanhamento. Reescrito em 05/08/2026 pra
+incorporar o backlog detalhado de refinamento pós-BI.
 
 ---
 
-## 1. Usuários (prioridade atual)
+## ✅ Concluído (resumo — não precisa mais de atenção)
 
-### 1.1 Painel de "Funcionalidades do sistema" — **concluído**
-Virou o papel Admin Master: novo `role='admin_master'`, tela "Dados gerais do
-sistema" exclusiva pra ele, com cascata de desativação de permissões e restrição de
-hierarquia por coordenação para admin comum. Já implementado, testado e publicado.
-
-### 1.2 Autogestão de conta pelo próprio usuário — **concluído**
-- Alterar o próprio e-mail: já existia (`account()`), sem mudança.
-- Autoexcluir a própria conta: implementado. Desativa (`ativo=0`) e anonimiza
-  e-mail/nome de usuário (liberando o e-mail original para um novo cadastro no
-  futuro), preservando o histórico (demandas, log) intacto, ainda vinculado ao
-  mesmo ID. Confirmação via pop-up (JS) na tela "Suas informações"; e-mail de
-  aviso enviado ao endereço atual, sem link de confirmação (ação já é imediata).
-
-### 1.5 Tela de configuração de textos de e-mail (Admin Master) — **novo, futuro**
-Hoje cada e-mail que o sistema envia (confirmação de cadastro, redefinir senha,
-demanda concluída, pede despacho, despacho emitido, providência alheia,
-transferência de demanda, conta cancelada...) é um arquivo HTML fixo no código.
-Pra ficar editável pelo admin master, seria necessário mover o texto de cada um
-pro banco de dados, e adaptar cada ponto do sistema que hoje monta o e-mail
-direto do arquivo pra buscar do banco. Frente própria, ainda não iniciada.
-
-### 1.3 Gestão de cadastros pendentes pelo admin — **concluído nesta sessão**
-Confirmar e-mail manualmente, reenviar confirmação, excluir cadastro não confirmado.
-Já implementado, testado e publicado.
-
-### 1.4 Fluxo "esqueci minha senha" — **conferido, já está completo**
-Testado de ponta a ponta: solicitação por e-mail (com tratamento de e-mail
-inválido/não confirmado), token com expiração de 1h, troca de senha com hash
-correto (`pbkdf2:sha256`), tratamento de token inválido/expirado, link visível
-na tela de login. Nenhum bug encontrado, nenhuma ação necessária.
+- **Usuários**: Admin Master, hierarquia por coordenação, autogestão de conta
+  (autoexclusão), gestão de cadastros pendentes, fluxo "esqueci minha senha"
+  conferido, correção do bug grave de despacho no registro, re-registro sobre
+  e-mail não confirmado.
+- **Roadmap de BI, as 4 etapas**: BI Convênios, BI Acordos, módulo TED
+  completo (Gestão + BI), Painel Executivo (Captado × Executado, sem soma
+  indevida entre TED e Acordo/Convênio).
+- **Infraestrutura**: `static_folder` corrigido (resolveu também o logo do
+  CNPq), URL do SICONV migrada pro novo endereço do Transferegov, proteção
+  automática de dados persistentes/singleton nos testes (item 8 antigo).
+- **Dados**: carga real de bolsistas (53.817 pagamentos, via `cargaPDCTR`
+  migrado pra `.xlsx`).
 
 ---
 
-## 2. Acordos / Bolsas
+## 🔴 1. Homologação — prioridade combinada
 
-### 2.1 Excluir modalidade de bolsa após inserida — **bug/lacuna**
-Nota antiga: não é possível excluir uma modalidade depois de cadastrada.
-
-### 2.2 Separar "nome completo da modalidade" da "sigla" — **melhoria de dados**
-Sugestão sua: hoje o campo modalidade parece misturar sigla e nome completo. Seria
-adicionar um campo novo (`nome_completo`) mantendo `modalidade` como a sigla.
-
-### 2.3 Tela de upload de `cargaPDCTR` só aceita `.xls` — **pendente, decisão deliberada**
-`cargaPDCTR` foi migrada de `xlrd` (`.xls`) para `openpyxl` (`.xlsx`) pra ler a
-planilha real usada por você (fonte diferente da COSAO original, que também não
-tem a coluna "Sexo Proc. Filho" — virou campo opcional, gravado como `None`
-quando ausente). A tela `/carregaPDCTR` continua usando `ArquivoForm`
-(`project/acordos/forms.py`), que só aceita `.xls` no upload
-(`FileAllowed(['xls'], ...)`) — decisão deliberada de não mexer nesse form
-agora, porque ele é compartilhado com outras 3 rotas de upload, e você está
-rodando a carga direto no terminal (`carga_pdctr_direta.py`), não pela tela.
-Se um dia for preciso fazer upload de `.xlsx` pela tela, a opção mais segura é
-uma classe de form nova (`ArquivoXlsxForm`, aceitando `['xls', 'xlsx']`) usada
-só nessa rota, sem tocar no `ArquivoForm` compartilhado.
-
-## 3. Acordos / Programas CNPq
-
-### 3.1 Editar/excluir programa após inserido — **lacuna**
-Nota antiga: depois de cadastrado, um Programa CNPq não pode ser editado nem excluído
-pela interface.
+- Gerar/enviar a imagem Docker pro Harbor (versão a definir — ver nota de
+  versionamento no final deste documento)
+- Enviar o pedido formal pra infraestrutura (`pedido_ambiente_testes.txt`,
+  já pronto — reapresentar)
+- Troca de domínio `sicopesii.cnpq.br` → `sistac.cnpq.br` (parte do mesmo
+  pedido)
 
 ---
 
-## 4. Página "Sobre"
+## 🟡 2. Refinamento pós-BI — backlog detalhado (Igor, 05/08/2026)
 
-### 4.1 Botão de edição para Admin master — **novo, precisa de decisão de papel**
-Mesma decisão pendente do item 1.1: se criarmos um papel "admin master"/"super admin",
-esse botão de edição da página Sobre seria uma das primeiras coisas a usar essa
-permissão nova. Vale decidir a hierarquia de papéis (item 1.1) antes de implementar
-isso, para não fazer duas vezes.
+Ordem sugerida por Igor: TED → Convênios → Acordos. Mantida abaixo. Ao
+final desta seção, uma sugestão minha de sequenciamento dentro disso.
 
----
+### Nota importante — dois mecanismos de curadoria diferentes, não confundir
 
-## 5. Relatórios / UX
+- **Acordo ↔ Programa CNPq**: mecanismo **manual, antigo**, já existia antes
+  de qualquer trabalho de BI (tela "Associar Programa(s) ao Acordo/TED").
+  Nunca foi automatizado. O Painel Executivo usa esse vínculo manual
+  (`grupo_programa_cnpq`) pra agregar por Programa CNPq.
+- **Processo-Mãe (pagamento de bolsista) ↔ Acordo**: mecanismo **novo**,
+  parcialmente automatizado (78% nos 139 processos-mãe testados, o resto
+  numa fila de revisão manual dentro do próprio sistema). Serve pra outra
+  coisa — rastrear a qual Acordo um lote de pagamentos pertence — não tem
+  relação com o Painel Executivo.
 
-### 5.1 Geração de CSV mudou de comportamento — **revisar**
-Nota antiga: o botão de download sumiu e o CSV passou a ser gerado direto, sem pedir
-confirmação. Precisa decidir se isso foi uma regressão da refatoração ou uma mudança
-desejada — vou conferir o código específico quando chegarmos nesse item.
+### A. TED
 
----
+| # | Item |
+|---|---|
+| A1 | Programa CNPq: hoje cadastrado manualmente — avaliar carregar automaticamente a partir dos dados do DW |
+| A2 | Gestão TED: texto da coluna em branco (cor branca sobre fundo branco) — corrigir pra preto |
+| A3 | Gestão TED: separar coluna "Vigência" em duas — início e fim |
+| A4 | Gestão TED: colorir "Vigência fim" com o mesmo padrão de Convênios/Acordos (cinza a 90 dias do fim, amarelo a 60, vermelho a 30) |
+| A5 | Gestão TED: instituições devem aparecer pela sigla, não nome completo |
+| A6 | Gestão TED: vínculo de Acordo/Convênio só permite 1 por vez, mas um TED pode ter até 27 — e o campo pede um ID que o usuário não tem acesso. **Decisão de Igor: não permitir vincular Acordo/Convênio pela tela de TED — o caminho é o inverso** (vincular TED a partir da tela de Acordo/Convênio, ver itens B14 e C6 abaixo) |
+| A7 | BI TED: filtro por coordenação + quadro por coordenação |
+| A8 | BI TED: filtro "órgão de origem" — usar siglas, não nome completo |
+| A9 | BI TED: filtro "Ano" — trocar pro ano de início de vigência, ou tooltip explicando o que o filtro atual representa |
 
-## 6. Convênios / TED / Acordos — reestruturação e BI (prioridade política atual)
+### B. Convênios
 
-Contexto: há uma janela política em aberto (possível saída do presidente do CNPq no
-início do ano, por conta das eleições) para obter apoio à homologação/produção do
-sistema. Por isso, esta frente foi priorizada à frente de `Demandas`, que fica para
-outro momento.
+| # | Item |
+|---|---|
+| B1 | Renomear título "Lista dos Programas de Convênio (Transferegov)" → "Cadastrar Programa de Convênio no SISTAC" |
+| B2 | Tela de inserir/alterar Programa: campo "Sigla*" → "Sigla do Convênio ou Programa no CNPq" |
+| B3 | Renomear menu "Programas" → "Programas do Transferegov" (mesma tela do B1, título duplicado no pedido original — considerar como um único ajuste) |
+| B4 | Remover "Lista em execução" do menu |
+| B5 | Remover "Em execução por UF e Programa" do menu + comentar a execução (mesmo padrão já feito em Acordos) |
+| B6 | Remover "Histórico por Programa" do menu + comentar a execução (idem) |
+| B7 | Remover "Mapa" do menu + comentar a execução (idem) |
+| B8 | Criar item de menu "Gestão", com "Programas do Transferegov" como submenu |
+| B9 | Convênio → Programa CNPq: tabela existe, nada grava nela ainda (cobertura 0% no Painel Executivo). **Confirmar**: o sistema já busca os Programas CNPq via DW? Se sim, avaliar se dá pra popular esse vínculo a partir de lá também (mesma ideia do item A1) |
+| B10 | BI Convênios: filtro por coordenação + quadro por coordenação |
+| B11 | BI Convênios: filtro "órgão de origem" — siglas, não nome completo |
+| B12 | BI Convênios: filtro "Ano" — ano de início de vigência, ou tooltip |
+| B13 | Gestão → Lista de Convênios: filtros no mesmo padrão da Gestão de TED |
+| B14 | Gestão → Lista de Convênios → Convênio: campo pra vincular um TED a esse convênio (inverso do item A6) |
 
-| # | Item | Descrição | Observação |
-|---|------|-----------|------------|
-| 6.1 | Renomear menu "Acordos/TEDs" | Remove a palavra "TEDs" do rótulo, fica só "Acordos" | **Concluído** |
-| 6.2 | Criar aba própria de TED | Nova aba, nos moldes visuais do módulo Convênios | Estrutura de tela pode sair rápido; dado real depende do item 6.4 |
-| 6.3 | Melhorar o sentido de "Instrumentos" | Ainda não detalhado — se é o nome, a descrição, ou os dados exibidos | Aguardando detalhamento de Igor |
-| 6.4 | Integração de dados de TED (SICONV/transferegov) | TED hoje não existe como dado — é só um rótulo, misturado com Acordo. Precisa de fonte de dados nova (API/portal do transferegov a pesquisar) | Grande, não é rápido — não depende só de reorganizar tela |
-| 6.5 | Substituir 3 dashboards por BI | Em Convênios: "Em execução por UF e Programa", "Histórico por Programa", "Mapa". Mesmo tratamento para Acordos e (futuramente) TED | **Concluído para Convênios/Acordos/TED.** As 3 rotas antigas de Acordos (`resumo_acordos`, `brasil_acordos`, `quadro_acordos`) foram **comentadas** em `project/acordos/views.py` (não removidas — decisão sobre exclusão definitiva do código fica pendente), seus links tirados do menu, e os testes correspondentes removidos de `tests/test_acordos_dashboards.py`. |
-| 6.6 | Integração futura TED + Acordos | Unificação de dados/fluxo entre os dois | Futuro, não priorizado agora |
-| 6.7 | Curadoria do vínculo Processo-Mãe ↔ Acordo | Nova tela (`Acordos → Gestão → Curadoria`) que classifica automaticamente a correspondência entre os 139 processos-mãe reais (carregados via `cargaPDCTR`) e os Acordos cadastrados, usando FAP-direta/UF-dominante/texto (algoritmo validado interativamente: 108 de 139 com correspondência confiável). Vincula automaticamente os casos de confiança alta/média; os de UF-ambígua e sem-correspondência ficam numa fila de revisão manual, com indicador de progresso. | **Concluído.** Reaproveita a tabela `Acordo_ProcMae` já existente, agora com campos de auditoria (`tipo_evidencia`, `usuario_curador_id`, `data_vinculo`). |
-| 6.8 | Painel Executivo (Etapa 4 do roadmap de BI) | Tela pública (`/painel_executivo/`), consolidando Convênio+Acordo+TED por Programa CNPq pra alta gestão — ver `etapa4_painel_executivo.md`. | **Concluído, com uma correção importante em relação ao roadmap original**: em vez de somar os 3 instrumentos num "valor total consolidado" único (o roadmap original sugeria isso), a tela mostra **Captado (TED)** e **Executado (Convênio+Acordo)** sempre separados, nunca somados entre si — TED é dinheiro captado de outro órgão que o CNPq depois executa via Convênio/Acordo, então somar contaria o mesmo real duas vezes (achado de Igor, registrado em `correcao_painel_executivo_dupla_contagem.txt`). Ranking por Programa CNPq segue o mesmo princípio (TED em coluna separada, não empilhado no total "Executado"). Reconciliação exata de qual TED financiou qual Acordo/Convênio é item futuro (ver 6.6). "Programa Estratégico" (Nível 3 do esboço original) ficou de fora desta etapa — exige tabela nova + curadoria manual própria, decisão já tomada antes de programar. |
+### C. Acordos
 
-**Próximo passo combinado**: avançar com o item 6.5 (BI), já que é a demanda mais
-direta das chefias e o SISTAC já possui os dados necessários — só falta apresentá-los
-bem. Igor vai fornecer massa de dados anonimizada para uso no desenvolvimento.
-
----
-
-## 7. Infraestrutura / Ambiente (fora do controle do código da aplicação)
-
-Itens que não se resolvem só editando `sistac` — dependem de configuração de servidor
-ou de decisões de infraestrutura do CNPq:
-
-- **Logo do CNPq não aparecendo**: ainda pendente de diagnóstico (precisa confirmar se
-  `/static/coop_nac.png` carrega direto pela URL) — mas há uma pista forte, ver item
-  abaixo (`static_folder` fixo em caminho de Docker): pode ser a mesma causa.
-- **`static_folder` fixo em caminho de Docker — quebra downloads de CSV (e possivelmente
-  o logo) fora do container**: `project/__init__.py` cria o Flask com
-  `static_folder='/app/project/static'` (caminho fixo, assumindo o container Docker de
-  produção). Nesse Codespace (onde o projeto vive em `/workspaces/sistac`), esse caminho
-  não existe — então qualquer link `/static/arquivo` (`convenios.csv`,
-  `programas_conv.csv`, e agora também `ted.csv`, adicionado na frente de melhorias da
-  Gestão de TED) responde 404, mesmo que o arquivo tenha sido gerado corretamente em
-  `project/static/` no disco real. Confirmado testando `convenios.csv` (já existia,
-  mesmo problema) e `ted.csv` (novo). Provavelmente é a mesma causa do item do logo
-  acima. Correção sugerida: usar um caminho relativo/portável (ex:
-  `os.path.join(os.path.dirname(__file__), 'static')`, mesmo padrão já usado em
-  `cria_csv` via `app.root_path`) em vez do caminho fixo do Docker — mas requer
-  confirmar com o time de infra se a produção depende desse caminho fixo por algum
-  outro motivo antes de mudar.
-- **Mapa de Convênios "Access blocked"**: política de uso de tiles do OpenStreetMap
-  bloqueando por falta de `Referer` correto — comum em ambientes de preview/proxy como
-  o do Codespace. Pode não se reproduzir em produção.
-- **Integração Oracle DW ("Pega Programas/Chamadas/Financeiro DW")**: já documentado
-  como dívida técnica em `core/services.py` — falta a biblioteca cliente do Oracle no
-  ambiente, e há SQL montado por concatenação que merece hardening dedicado (ver seção
-  "Security/Technical Debt" no código).
+| # | Item |
+|---|---|
+| C1 | Gestão → Todos: filtros no mesmo padrão da Gestão de TED |
+| C2 | **A coluna "#" não é um ID estável** (varia conforme ordenação/filtro) — não serve pra relacionamento. Usar o número SEI (`nnnnnn/aaaa-dd`, já obrigatório no cadastro) como identificador real |
+| C3 | Renomear "Lista de Acordos/TEDs" → "Lista de Acordos" |
+| C4 | Renomear "Inserir detalhes de um Acordo/TED" → "Inserir detalhes de um Acordo" |
+| C5 | **Bug de dado**: campos Capital/Custeio/Bolsas em Acordo pertencem só ao CNPq — a fórmula está somando Valor CNPq + Valor EP indevidamente nesses campos. Remover a soma, adicionar tooltip explicando |
+| C6 | Inserir campo pra vincular número de TED (inverso do item A6, mesma ideia do B14) |
+| C7 | BI Acordos: filtro por coordenação + quadro por coordenação |
+| C8 | BI Acordos: filtro "órgão de origem" — siglas |
+| C9 | BI Acordos: filtro "Ano" — ano de início de vigência, ou tooltip |
 
 ---
 
-## 8. ✅ RESOLVIDO — Infraestrutura de testes — proteção contra efeito colateral em dado persistente/singleton
+## Itens removidos do escopo
 
-Já tinham ocorrido vários casos de testes que escrevem em dado **persistente e
-compartilhado** entre execuções (a linha única de `Sistema`, a linha única de
-`RefSICONV`, contas de usuário reais no banco de dev, e tabelas de conteúdo
-inteiras) e não restauravam o estado original ao terminar:
-
-- A linha única de `Sistema` e contas reais (ex: `igorc@cnpq.br`) já tiveram
-  Gestão/BI desligados e permissões zeradas por um teste de
-  `admin_reg_ver` que fazia POST minimalista deixando todo `BooleanField`
-  desmarcado.
-- `services.cargaTED()` faz *delete-and-reload* de verdade nas 3 tabelas
-  espelho de TED (`TED_PlanoAcao`, `TED_Programa`, `TED_TermoExecucao`) —
-  comportamento correto da função, mas dois testes (`test_carga_ted_mockada_
-  popula_tabelas_espelho` e `test_data_ultima_carga_gravada_e_exibida`) chamam
-  essa função de verdade (só a chamada HTTP é mockada) contra o banco de dev
-  persistente. Cada rodada da suíte substituía os TEDs reais pelos dados de
-  mock/vazios dos testes.
-- Achado durante a correção da URL do SICONV (item 9): `RefSICONV.cod_inst`
-  também é mutado sem restauração por um teste de `admin_reg_ver`
-  (`tests/test_users_admin.py`).
-
-**Confirmado ao vivo, antes da correção**: `TED_PlanoAcao` estava com **0
-linhas** no banco de dev nesta sessão — os 301 TEDs reais carregados
-anteriormente já tinham sido apagados por essas rodadas de teste sem ninguém
-perceber, exatamente o cenário de risco que este item descrevia.
-
-**Solução implementada** (`tests/conftest.py`):
-- `protege_dados_persistentes_singleton` (fixture **autouse**, roda ao redor
-  de todo teste): tira snapshot de todas as colunas da linha única de
-  `Sistema`, da linha única de `RefSICONV` e da conta real `igorc@cnpq.br`
-  antes do teste, e restaura depois — independente do teste ter passado ou
-  falhado. Testes que legitimamente alteram esses dados durante a execução
-  (ex: `test_users_config_sistema.py`) continuam funcionando normalmente; só
-  o estado final é que sempre volta ao original. **Elimina o ritual manual
-  de restauração pós-suíte** que vinha sendo repetido a cada sessão.
-- `preserva_tabelas_ted` (fixture opt-in, por ser mais cara — snapshot de 3
-  tabelas inteiras): restaura `TED_PlanoAcao`/`TED_Programa`/
-  `TED_TermoExecucao` ao estado anterior. Aplicada explicitamente nos 2
-  testes que chamam `cargaTED()` de verdade.
-
-**Verificação**: rodei `cargaTED()` de verdade pra repovoar os 301 TEDs reais
-(apagados antes da correção), depois rodei a suíte completa **duas vezes
-seguidas, sem nenhuma restauração manual entre elas**. Resultado idêntico nas
-duas rodadas: `Sistema`/`RefSICONV`/`igorc@cnpq.br` sempre no valor correto,
-`TED_TermoExecucao` estável em 262 (nenhum teste cria linhas sintéticas
-nessa tabela — sinal direto de que a restauração é exata), `TED_PlanoAcao`/
-`TED_Programa` estáveis (347/292 nas duas rodadas — a diferença em relação a
-301/278 é de fixtures sintéticas idempotentes de *outros* testes, como já é
-o padrão estabelecido no restante da suíte, não de vazamento). 201 testes
-passando.
-
-Alternativa de banco de teste isolado/efêmero (Fase 2+, já cogitada no
-comentário de `tests/conftest.py`) continua válida como evolução futura, mas
-não é mais bloqueante — a proteção via fixture já resolve o problema
-concreto.
+- **Programa Estratégico** (agrupar edições do mesmo Programa CNPq, ex:
+  "Conhecimento Brasil 2024" + "2026"): confirmado por Igor que não é mais
+  necessário. Removido do roadmap do Painel Executivo.
 
 ---
 
-## 9. ✅ RESOLVIDO — URL do SICONV (repositorio.dados.gov.br) será desligada em 31/08/2026
+## 🟢 3. Itens pequenos, sem decisão ainda
 
-Confirmado via Comunicado Transferegov nº 23/2026 (17/07/2026, oficial):
-`http://repositorio.dados.gov.br/seges/detru/` — a URL configurada hoje em
-`URL_SICONV` — **para de funcionar em 31/08/2026**. Sem ação, a carga de
-Convênios (`cargaSICONV()`) vai quebrar nessa data.
-
-**O que já se sabe:**
-- Existe um novo ambiente: `https://api-publica.transferegov.gestao.gov.br/`
-- Pra Convênios ("módulo Discricionárias e Legais"), o que existe lá por
-  enquanto é uma nova área de **download de CSV** (mesmo formato de
-  sempre), não uma API estruturada tipo a do TED ainda — essa API completa
-  só chega em fases, entre nov/2026 e out/2027
-- **Não foi possível confirmar o caminho exato dos novos arquivos CSV** —
-  a página oficial de download (`/dados-abertos/download-dados`) ainda não
-  foi atualizada com os novos links, continua mostrando só os antigos (que
-  vão sumir)
-- O PDF de Histórico de Versões do Modelo de Dados (`historico_de_versoes.pdf`,
-  consultado até v25, 25/08/2025) confirma a estrutura atual dos CSVs, mas
-  não traz informação de endereço/migração
-
-**Atualização (04/08/2026): URL nova confirmada por Igor, testada e
-funcionando:**
-
-    https://api-publica.transferegov.gestao.gov.br/downloads/dadosgov/
-
-**Detalhe técnico importante**: o padrão de nome mudou — antes
-`siconv_convenio.csv.zip`, agora `siconv_convenio.zip` (sem `.csv` antes
-do `.zip`). Isso exigiu um ajuste pequeno no código (não só trocar a
-variável de ambiente) — ver `prompt_atualiza_url_siconv.txt`.
-
-**Atualização (05/08/2026): correção aplicada e verificada de ponta a
-ponta.** `cargaSICONV()` (`project/core/services.py`) agora monta a URL
-remota removendo o `.csv` do nome do arquivo antes de pedir o `.zip`
-(`nome_remoto = arquivo.replace('.csv', '')`), mantendo o nome local
-igual (usado depois pra descompactar/ler). Rodei a carga real completa
-contra a URL nova (`https://api-publica.transferegov.gestao.gov.br/downloads/dadosgov/`):
-os 10 arquivos baixaram, descompactaram e carregaram sem erro —
-`Programa: 85, Proposta: 499, Convenio: 362` no banco, `RefSICONV.data_ref`
-atualizado. **Confirmado que o nome do arquivo *dentro* do zip não mudou**
-(continua `siconv_convenio.csv`, etc.) — não foi preciso nenhum ajuste
-adicional na leitura do CSV extraído. Suíte completa (201 testes)
-passando. `URL_SICONV` precisa ser atualizada nas variáveis de ambiente
-de cada ambiente (dev/produção) pra essa nova URL antes de 31/08/2026.
+- **3.1** — Não dá pra excluir modalidade de bolsa depois de cadastrada
+- **3.2** — Separar sigla/nome completo da modalidade de bolsa
+- **3.3** — Não dá pra editar/excluir Programa CNPq depois de cadastrado
+- **3.4** — Comportamento do CSV mudou (revisão pendente, nunca foi
+  conferida de fato)
+- **3.5** — Upload de `.xlsx` pela tela do `cargaPDCTR` (hoje só funciona
+  via terminal, decisão deliberada de adiar)
 
 ---
 
-## Como sugiro seguirmos
+## 4. Módulo Demandas
 
-**Prioridade atual (janela política em aberto):** avançar com o item 6.5 (BI sobre
-Convênios/Acordos/TED) — é a frente escolhida por atender diretamente à demanda das
-chefias, usando dados que o sistema já possui.
+Deixado de lado desde o início da frente de BI, a pedido de Igor — maior
+módulo do sistema (~3.371 linhas), ainda com pendências da fase de
+refatoração original (grupos E, F, G).
 
-Itens 1.x a 5.x seguem no backlog geral, concluídos ou pendentes conforme já registrado
-em cada seção — retomamos assim que a frente de BI e homologação estiver encaminhada.
-`Demandas` fica propositalmente de fora por enquanto, a pedido de Igor.
+---
+
+## 5. Itens futuros, sem prazo
+
+- **E-mails** — tela de configuração de textos de e-mail pelo admin master
+  (ainda nem começou)
+- **Integração de verdade TED ↔ Acordo/Convênio** — rastrear qual TED
+  financiou qual Acordo/Convênio especificamente (hoje o Painel Executivo
+  evita isso mostrando Captado/Executado separados, mas a reconciliação
+  exata não existe)
+- **TED → Gestão**: clicar no número do TED deveria abrir o detalhamento
+  completo, mesmo padrão de Convênios/Acordos
+- **Mapas** — OpenStreetMap bloqueado no preview do Codespace (pode não se
+  repetir em produção)
+- **Integração Oracle DW** — ainda sem biblioteca cliente no ambiente de
+  desenvolvimento
+
+---
+
+## Nota sobre versionamento
+
+Não existe uma regra formal de versionamento no projeto — o padrão seguido
+até agora (`5.0.13` → `5.0.14`) foi só incrementar o último número, por
+precedente histórico, sem lógica definida. Sugestão (não decidida):
+incrementar o número do **meio** pra levas grandes de funcionalidade nova
+(essa leva de BI seria `5.1.0`), reservando o último número pra correções
+pontuais dali em diante. Fica a critério de Igor.
+
+---
+
+## Sugestão de sequenciamento (Claude)
+
+A ordem por módulo (TED → Convênios → Acordos) faz sentido e mantenho.
+Duas sugestões de ajuste **dentro** dessa ordem:
+
+1. **Adiantar os dois itens que são bugs de verdade, não só polimento**:
+   A2 (texto branco ilegível) e C5 (Capital/Custeio/Bolsas somando EP
+   indevidamente — esse em especial pode estar afetando dado já salvo,
+   vale conferir com prioridade). São baratos de corrigir e o C5 tem risco
+   de dado incorreto se não for tratado logo.
+2. **Fazer A6/B14/C6 como um bloco só**, já que são as três pontas do
+   mesmo relacionamento (vincular TED a partir de Convênio/Acordo, não o
+   inverso) — separar isso em três tarefas despachadas em momentos
+   diferentes arrisca inconsistência entre elas.
+
+Fora isso, a ordem proposta está boa — trato como confirmada, a menos que
+você quera ajustar.
