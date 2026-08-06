@@ -381,13 +381,19 @@ class TED_Programa(db.Model):
     codigo_programa           = db.Column(db.String)
     nome                      = db.Column(db.String)
     unidade_descentralizadora = db.Column(db.String)
+    # sigla do órgão de origem (ex: "MCTI") — a API do TransfereGov manda
+    # num campo separado do nome por extenso; usada na exibição da Gestão
+    # de TED, com fallback pro nome completo quando vier vazia
+    sigla_unidade_descentralizadora = db.Column(db.String)
     ano                       = db.Column(db.String)
 
-    def __init__(self, id, codigo_programa, nome, unidade_descentralizadora, ano):
+    def __init__(self, id, codigo_programa, nome, unidade_descentralizadora, ano,
+                 sigla_unidade_descentralizadora=None):
         self.id                        = id
         self.codigo_programa           = codigo_programa
         self.nome                      = nome
         self.unidade_descentralizadora = unidade_descentralizadora
+        self.sigla_unidade_descentralizadora = sigla_unidade_descentralizadora
         self.ano                       = ano
 
     def __repr__(self):

@@ -90,6 +90,7 @@ def cargaTED():
             codigo_programa=prog.get('tx_codigo_programa'),
             nome=prog.get('tx_nome_programa'),
             unidade_descentralizadora=prog.get('unidade_descentralizadora'),
+            sigla_unidade_descentralizadora=prog.get('sigla_unidade_descentralizadora'),
             ano=str(prog.get('aa_ano_programa') or ''),
         ))
     db.session.commit()
@@ -176,7 +177,10 @@ _CHAVES_ORDENACAO = {
     'orgao': lambda item: (item['programa'].unidade_descentralizadora if item['programa'] else ''),
     'situacao': lambda item: (item['plano'].situacao_plano or ''),
     'valor': lambda item: (item['plano'].valor_beneficiario_especifico or 0) + (item['plano'].valor_chamamento_publico or 0),
-    'vigencia': lambda item: (item['plano'].vigencia_inicio or dt.date.min),
+    # 'vigencia' (coluna única, início–fim numa string só) foi separada em
+    # duas colunas independentes na tela, cada uma com sua própria ordenação
+    'vigencia_inicio': lambda item: (item['plano'].vigencia_inicio or dt.date.min),
+    'vigencia_fim': lambda item: (item['plano'].vigencia_fim or dt.date.min),
 }
 
 
@@ -263,6 +267,8 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
     elif filtros.get('programa_cnpq') == 'pendente':
         linhas = [(p, prog) for p, prog in linhas if p.id not in programas_vinculados]
 
+    hoje = dt.date.today()
+
     resultado = []
     for plano, programa in linhas:
         vinculo_prog = programas_vinculados.get(plano.id)
@@ -289,6 +295,11 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
         execucoes = execucoes_por_plano.get(plano.id, [])
         coordenacoes = sorted({e.coordenacao for e in execucoes if e.coordenacao})
 
+        # dias até o fim da vigência, pra colorir a coluna "Fim" na tela
+        # (mesmo padrão de Convênios). None quando não há data de fim —
+        # vários TEDs vêm da API sem vigência preenchida.
+        prazo = (plano.vigencia_fim - hoje).days if plano.vigencia_fim else None
+
         resultado.append({
             'plano': plano,
             'programa': programa,
@@ -297,6 +308,7 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
             'execucoes': execucoes,
             'coordenacoes': coordenacoes,
             'instrumentos': instrumentos,
+            'prazo': prazo,
         })
 
     if sort in _CHAVES_ORDENACAO:
@@ -318,18 +330,47 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
     return resultado[inicio:inicio + per_page], paginacao
 
 
+def sigla_ou_nome_orgao(programa):
+    """
+    Sigla do órgão de origem (ex: "MCTI") com fallback pro nome por
+    extenso quando a API não mandou sigla — vários programas antigos
+    vêm sem esse campo preenchido, e mostrar vazio seria pior que
+    mostrar o nome longo.
+    """
+    if programa is None:
+        return None
+    return programa.sigla_unidade_descentralizadora or programa.unidade_descentralizadora
+
+
 def opcoes_filtro():
-    """Opções para os selects de filtro da tela de gestão."""
+    """
+    Opções para os selects de filtro da tela de gestão.
+
+    `orgaos` continua sendo a lista de nomes por extenso (é o valor
+    usado no filtro, casando com TED_Programa.unidade_descentralizadora
+    na query) — mantido assim de propósito pra não quebrar o BI de TED,
+    que consome a mesma função. `orgaos_siglas` é o de-para nome
+    completo -> sigla, usado só na exibição (item A5).
+    """
     orgaos = [o.unidade_descentralizadora for o in db.session.query(TED_Programa.unidade_descentralizadora)
               .filter(TED_Programa.unidade_descentralizadora.isnot(None))
               .distinct().order_by(TED_Programa.unidade_descentralizadora).all()]
+
+    orgaos_siglas = {
+        p.unidade_descentralizadora: p.sigla_unidade_descentralizadora
+        for p in db.session.query(TED_Programa.unidade_descentralizadora,
+                                  TED_Programa.sigla_unidade_descentralizadora)
+                 .filter(TED_Programa.unidade_descentralizadora.isnot(None))
+                 .distinct().all()
+        if p.sigla_unidade_descentralizadora
+    }
     situacoes = [s.situacao_plano for s in db.session.query(TED_PlanoAcao.situacao_plano)
                  .filter(TED_PlanoAcao.situacao_plano.isnot(None))
                  .distinct().order_by(TED_PlanoAcao.situacao_plano).all()]
     anos = [a.ano for a in db.session.query(TED_PlanoAcao.ano)
             .filter(TED_PlanoAcao.ano.isnot(None), TED_PlanoAcao.ano != '')
             .distinct().order_by(TED_PlanoAcao.ano.desc()).all()]
-    return {'orgaos': orgaos, 'situacoes': situacoes, 'anos': anos}
+    return {'orgaos': orgaos, 'orgaos_siglas': orgaos_siglas, 'situacoes': situacoes, 'anos': anos}
 
 
 def coordenacoes_choices():

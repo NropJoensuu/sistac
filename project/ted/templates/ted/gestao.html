@@ -33,7 +33,7 @@
           <select class="form-control" name="orgao">
             <option value="">Todos</option>
             {% for o in orgaos %}
-              <option value="{{ o }}" {% if filtros.orgao == o %}selected{% endif %}>{{ o }}</option>
+              <option value="{{ o }}" title="{{ o }}" {% if filtros.orgao == o %}selected{% endif %}>{{ orgaos_siglas.get(o) or o }}</option>
             {% endfor %}
           </select>
         </div>
@@ -79,7 +79,8 @@
               <th>{{ link_ordenacao('orgao', 'Órgão de origem') }}</th>
               <th>{{ link_ordenacao('situacao', 'Situação') }}</th>
               <th class="text-right">{{ link_ordenacao('valor', 'Valor') }}</th>
-              <th>{{ link_ordenacao('vigencia', 'Vigência') }}</th>
+              <th>{{ link_ordenacao('vigencia_inicio', 'Início') }}</th>
+              <th><abbr title="Vermelho: vence em menos de 30 dias. Laranja: vence em menos de 60 dias. Cinza: vence em menos de 90 dias.">{{ link_ordenacao('vigencia_fim', 'Fim') }}</abbr></th>
               <th>Coordenação do CNPq</th>
               <th>Programa CNPq</th>
               <th>SEI / execução (CNPq)</th>
@@ -100,7 +101,9 @@
                 </td>
                 <td>
                   {% if item.programa %}
-                    <span class="badge badge-secondary">{{ item.programa.unidade_descentralizadora }}</span>
+                    {# sigla como texto principal, nome completo no tooltip — fallback
+                       pro nome completo quando a API não mandou sigla (item A5) #}
+                    <span class="badge badge-secondary" title="{{ item.programa.unidade_descentralizadora }}">{{ item.programa.sigla_unidade_descentralizadora or item.programa.unidade_descentralizadora }}</span>
                   {% endif %}
                 </td>
                 <td>
@@ -114,12 +117,29 @@
                   {% if valor_total %}{{ '{:,.2f}'.format(valor_total).replace(',', 'X').replace('.', ',').replace('X', '.') }}{% else %}—{% endif %}
                 </td>
                 <td>
-                  {% if plano.vigencia_inicio and plano.vigencia_fim %}
-                    {{ plano.vigencia_inicio.strftime('%d/%m/%y') }}–{{ plano.vigencia_fim.strftime('%d/%m/%y') }}
+                  {% if plano.vigencia_inicio %}
+                    {{ plano.vigencia_inicio.strftime('%d/%m/%y') }}
                   {% else %}
-                    {{ plano.ano or '—' }}
+                    —
                   {% endif %}
                 </td>
+                {# cores por proximidade do vencimento — mesmo padrão de Convênios
+                   (list_convenios.html). item.prazo é None quando não há data de fim. #}
+                {% if item.prazo is not none and item.prazo <= 30 and item.prazo >= 0 %}
+                  <td class="bg-danger text-white font-weight-bold">{{ plano.vigencia_fim.strftime('%d/%m/%y') }}</td>
+                {% elif item.prazo is not none and item.prazo <= 60 and item.prazo > 30 %}
+                  <td class="bg-warning text-dark font-weight-bold">{{ plano.vigencia_fim.strftime('%d/%m/%y') }}</td>
+                {% elif item.prazo is not none and item.prazo <= 90 and item.prazo > 60 %}
+                  <td class="bg-secondary text-white font-weight-bold">{{ plano.vigencia_fim.strftime('%d/%m/%y') }}</td>
+                {% else %}
+                  <td>
+                    {% if plano.vigencia_fim %}
+                      {{ plano.vigencia_fim.strftime('%d/%m/%y') }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                {% endif %}
                 <td>
                   {% if item.coordenacoes %}
                     {% for coord in item.coordenacoes %}
@@ -154,7 +174,7 @@
                 </td>
               </tr>
             {% else %}
-              <tr><td colspan="9" class="text-center text-muted py-4">Nenhum TED carregado ainda — a carga roda automaticamente uma vez por dia, ou pode ser disparada em Carga → Atualizar TED (TransfereGov).</td></tr>
+              <tr><td colspan="10" class="text-center text-muted py-4">Nenhum TED carregado ainda — a carga roda automaticamente uma vez por dia, ou pode ser disparada em Carga → Atualizar TED (TransfereGov).</td></tr>
             {% endfor %}
           </tbody>
         </table>
