@@ -81,6 +81,23 @@ def test_bi_acordos_com_filtros_responde_200(client, app):
     assert resp.status_code == 200
 
 
+def test_bi_acordos_filtro_coord_e_regiao(app):
+    """
+    Itens C7 (coordenação) e C8 (região, redefinido por Igor — reaproveita
+    o mapa UF -> Região criado em Convênios/B11): confere que os
+    agregados por_coord/por_regiao batem com os dados reais e que o
+    filtro por região usa Acordo.uf corretamente (SP -> Sudeste).
+    """
+    with app.app_context():
+        _acordo('00000.000000/2024-54', uf='SP', situ='Vigente-Z')
+
+        dados = services.bi_acordos({'coord': 'DPI'})
+        assert any(c['coordenacao'] == 'DPI' for c in dados['coordenacoes'])
+
+        dados_regiao = services.bi_acordos({'regiao': 'Sudeste'})
+        assert any(r['regiao'] == 'Sudeste' and r['qtd'] >= 1 for r in dados_regiao['regioes'])
+
+
 def test_bi_acordos_vigencia_a_vencer(app):
     """
     Confere que a contagem de "vigência a vencer em 3 meses" inclui um

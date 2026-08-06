@@ -51,11 +51,31 @@
         </div>
 
         <div class="form-group mr-2 mb-2">
-          <label class="mr-1" for="ano">Ano:</label>
+          <label class="mr-1" for="ano" title="Ano de início de vigência do acordo.">Ano: <small>&#9432;</small></label>
           <select class="form-control" id="ano" name="ano">
             <option value="">Todos</option>
             {% for a in opcoes_ano %}
               <option value="{{ a }}" {% if filtros.ano == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="coord">Coordenação:</label>
+          <select class="form-control" id="coord" name="coord">
+            <option value="">Todas</option>
+            {% for c in opcoes_coord %}
+              <option value="{{ c }}" {% if filtros.coord == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="regiao">Região:</label>
+          <select class="form-control" id="regiao" name="regiao">
+            <option value="">Todas</option>
+            {% for r in opcoes_regiao %}
+              <option value="{{ r }}" {% if filtros.regiao == r %}selected{% endif %}>{{ r }}</option>
             {% endfor %}
           </select>
         </div>
@@ -124,6 +144,18 @@
             <div class="card-body"><canvas id="chartEvolucao"></canvas></div>
           </div>
         </div>
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Acordos por coordenação do CNPq</div>
+            <div class="card-body"><canvas id="chartCoordenacoes"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">Acordos por região</div>
+            <div class="card-body"><canvas id="chartRegioes"></canvas></div>
+          </div>
+        </div>
       </div>
 
       <div class="row mb-4">
@@ -146,6 +178,8 @@
   const situacoes = {{ situacoes | tojson }};
   const programas = {{ programas | tojson }};
   const evolucao = {{ evolucao | tojson }};
+  const coordenacoes = {{ coordenacoes | tojson }};
+  const regioes = {{ regioes | tojson }};
 
   new Chart(document.getElementById('chartSituacao'), {
     type: 'doughnut',
@@ -170,6 +204,23 @@
     data: {
       labels: evolucao.map(e => e.ano),
       datasets: [{ label: 'Valor (R$)', data: evolucao.map(e => e.valor) }],
+    },
+  });
+
+  new Chart(document.getElementById('chartCoordenacoes'), {
+    type: 'bar',
+    data: {
+      labels: coordenacoes.map(c => c.coordenacao),
+      datasets: [{ label: 'Quantidade', data: coordenacoes.map(c => c.qtd) }],
+    },
+    options: { indexAxis: 'y' },
+  });
+
+  new Chart(document.getElementById('chartRegioes'), {
+    type: 'doughnut',
+    data: {
+      labels: regioes.map(r => r.regiao),
+      datasets: [{ data: regioes.map(r => r.qtd) }],
     },
   });
 </script>

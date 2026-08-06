@@ -11,6 +11,7 @@ import os
 import re
 import tempfile
 import locale
+import math
 import datetime
 from datetime import datetime as dt
 
@@ -30,6 +31,7 @@ from project.models import (
 )
 from project.demandas.views import registra_log_auto
 from project.core.services import consultaDW, chamadas_DW
+from project.convenios.services import regiao_da_uf, REGIOES
 
 
 def cria_csv(arq, linha, tabela):
@@ -1175,13 +1177,40 @@ def _resolver_unidade(coord, unidade_usuario):
     return (l_filhos if filhos else coord), coord
 
 
-def buscar_acordos(lista, coord, unidade_usuario):
+# campo de filtro/exibição -> função que extrai a chave de ordenação de um
+# item da lista já formatada por _formata_lista_acordos() (lista de listas,
+# indexada por posição — não por nome de coluna, ver docstring da função).
+# Mesmo padrão de _CHAVES_ORDENACAO em project/ted/services.py e
+# _CHAVES_ORDENACAO_CONV em project/convenios/services.py (item C1 do
+# backlog). Ordena sobre a lista já formatada (não a query SQL) porque a
+# situação exibida (índice 19) pode ter sido corrigida por regra de negócio
+# em _formata_lista_acordos e não bate necessariamente com Acordo.situ.
+_CHAVES_ORDENACAO_ACORDO = {
+    'unid': lambda a: a[15] or '',
+    'nome': lambda a: a[2] or '',
+    'uf': lambda a: a[5] or '',
+    'situacao': lambda a: a[19] or '',
+    'inicio': lambda a: a[6] or datetime.date.min,
+    'fim': lambda a: a[7] or datetime.date.min,
+    'bolsas': lambda a: a[26] or 0,
+}
+
+
+def buscar_acordos(lista, coord, unidade_usuario, filtros=None, page=1, per_page=25, sort=None, direcao='asc'):
     """
     Retorna a lista de acordos filtrada por coordenação e critério de
     lista ('todos', 'em execução', 'programaXXX', 'v_programaXXX',
     'edicXXX', 'UFxx...', 'PROG_UFxx...'), a data da última carga de
     chamadas do DW, e o valor de coordenação normalizado.
+
+    Item C1 do backlog: filtros adicionais (`filtros['situacao'/'uf'/
+    'busca']`), ordenação por clique no cabeçalho (`sort`, um dos campos
+    de _CHAVES_ORDENACAO_ACORDO, e `direcao` 'asc'/'desc') e paginação
+    (`page`) — mesma estrutura de listar_teds()/listar_convenios_siconv().
+    O CSV gerado em project/static/acordos.csv reflete sempre o conjunto
+    completo filtrado (sem paginar), mesmo espírito de exportar_teds_csv.
     """
+    filtros = filtros or {}
     unid, coord_normalizado = _resolver_unidade(coord, unidade_usuario)
 
     data_carga = db.session.query(RefSICONV.data_cha_dw).first()
@@ -1238,6 +1267,17 @@ def buscar_acordos(lista, coord, unidade_usuario):
 
     acordos = _formata_lista_acordos(acordos_v)
 
+    if filtros.get('situacao'):
+        acordos = [a for a in acordos if a[19] == filtros['situacao']]
+    if filtros.get('uf'):
+        acordos = [a for a in acordos if a[5] == filtros['uf']]
+    if filtros.get('busca'):
+        termo = filtros['busca'].lower()
+        acordos = [a for a in acordos if termo in (a[2] or '').lower() or termo in (a[3] or '').lower()]
+
+    if sort in _CHAVES_ORDENACAO_ACORDO:
+        acordos.sort(key=_CHAVES_ORDENACAO_ACORDO[sort], reverse=(direcao == 'desc'))
+
     caminho_csv = os.path.join(app.root_path, 'static', 'acordos.csv')
     try:
         cria_csv(
@@ -1251,7 +1291,29 @@ def buscar_acordos(lista, coord, unidade_usuario):
     except Exception:
         tem_csv = False
 
-    return acordos, len(acordos), coord_normalizado, data_cha, tem_csv
+    total = len(acordos)
+    pages = max(1, math.ceil(total / per_page))
+    page = max(1, min(page, pages))
+    inicio = (page - 1) * per_page
+
+    paginacao = {
+        'page': page, 'per_page': per_page, 'total': total, 'pages': pages,
+        'has_prev': page > 1, 'has_next': page < pages,
+        'prev_num': page - 1, 'next_num': page + 1,
+    }
+
+    return acordos[inicio:inicio + per_page], paginacao, coord_normalizado, data_cha, tem_csv
+
+
+def opcoes_filtro_acordos():
+    """Opções (globais) para os selects de filtro da Gestão de Acordos (item C1 do backlog)."""
+    situacoes = [s[0] for s in db.session.query(Acordo.situ)
+                 .filter(Acordo.situ.isnot(None), Acordo.situ != '')
+                 .distinct().order_by(Acordo.situ).all()]
+    ufs = [u[0] for u in db.session.query(Acordo.uf)
+           .filter(Acordo.uf.isnot(None), Acordo.uf != '')
+           .distinct().order_by(Acordo.uf).all()]
+    return {'situacoes': situacoes, 'ufs': ufs}
 
 
 def _formata_lista_acordos(acordos_v):
@@ -1654,10 +1716,33 @@ def bi_acordos(filtros=None):
     """
     Monta os indicadores da tela de BI de Acordos: valor total (CNPq +
     EPE) por situação, quantidade por situação, distribuição por
-    Programa CNPq, evolução anual e vigência a vencer em 3/6/12 meses.
+    Programa CNPq/coordenação do CNPq/região, evolução anual e
+    vigência a vencer em 3/6/12 meses.
 
-    Visão global (sem filtro de coordenação), mesma decisão de produto
-    do BI de Convênios.
+    Visão global (sem filtro de coordenação por padrão — mas
+    filtrável, item C7), mesma decisão de produto do BI de Convênios.
+
+    Item C7: quantidade/valor por coordenação do CNPq usa
+    Acordo.unidade_cnpq — campo estrutural nativo (mesmo já usado em
+    _base_query_acordos/_resolver_unidade), sem curadoria manual, mesmo
+    padrão de B10 em Convênios.
+
+    Item C8 (redefinido por Igor, mesma situação do B11 em Convênios):
+    não existe "órgão de origem" em Acordo — vira filtro por Região,
+    reaproveitando o mapa UF -> Região (padrão IBGE) já criado em
+    project/convenios/services.py, a partir de Acordo.uf. O filtro por
+    região é aplicado em Python (após a query), pois a região não é uma
+    coluna própria — mesmo espírito do filtro de situação/UF já
+    aplicado em Python em buscar_acordos() (item C1).
+
+    Item C9: o filtro "Ano" já usava (antes deste item) o ano de início
+    de vigência diretamente (Acordo.data_inicio.year) — não existe um
+    campo "Acordo.ANO" separado como em Convênio (Convenio.ANO vs.
+    DIA_INIC_VIGENC_CONV, item B12), então não havia ambiguidade a
+    resolver aqui. Conferido com dado real: dos 272 acordos reais na
+    base de dev (excluindo nome contendo "teste"), apenas 4,0% têm
+    data_inicio nulo — taxa baixa, então manter o filtro/evolução por
+    ano de início direto (sem tooltip) é seguro, mesma decisão do B12.
 
     Indicadores do roadmap que dependem da cadeia processo mãe/filho/
     chamada/bolsista/pagamento (quantidade de processos, chamadas,
@@ -1677,6 +1762,8 @@ def bi_acordos(filtros=None):
         base = base.filter(Acordo.situ == filtros['situacao'])
     if filtros.get('uf'):
         base = base.filter(Acordo.uf == filtros['uf'])
+    if filtros.get('coord'):
+        base = base.filter(Acordo.unidade_cnpq == filtros['coord'])
     if filtros.get('ano'):
         ano = filtros['ano']
         base = base.filter(
@@ -1690,6 +1777,9 @@ def bi_acordos(filtros=None):
                    .filter(Programa_CNPq.SIGLA_PROGRAMA == filtros['programa'])
 
     acordos = base.all()
+
+    if filtros.get('regiao'):
+        acordos = [ac for ac in acordos if regiao_da_uf(ac.uf) == filtros['regiao']]
 
     # valor (CNPq + EPE) e quantidade, por situação
     por_situacao = {}
@@ -1746,6 +1836,33 @@ def bi_acordos(filtros=None):
         key=lambda x: x['ano'],
     )
 
+    # quantidade/valor por coordenação do CNPq (item C7)
+    por_coord = {}
+    for ac in acordos:
+        nome_coord = ac.unidade_cnpq or 'Sem coordenação cadastrada'
+        item = por_coord.setdefault(nome_coord, {'qtd': 0, 'valor': 0.0})
+        item['qtd'] += 1
+        item['valor'] += (ac.valor_cnpq or 0) + (ac.valor_epe or 0)
+
+    coordenacoes = sorted(
+        [{'coordenacao': nome, 'qtd': item['qtd'], 'valor': item['valor']} for nome, item in por_coord.items()],
+        key=lambda x: x['qtd'], reverse=True,
+    )
+
+    # quantidade/valor por região (padrão IBGE — item C8), a partir da UF
+    # do parceiro (Acordo.uf, já usada no filtro 'uf')
+    por_regiao = {}
+    for ac in acordos:
+        nome_regiao = regiao_da_uf(ac.uf) or 'Não informado'
+        item = por_regiao.setdefault(nome_regiao, {'qtd': 0, 'valor': 0.0})
+        item['qtd'] += 1
+        item['valor'] += (ac.valor_cnpq or 0) + (ac.valor_epe or 0)
+
+    regioes = sorted(
+        [{'regiao': nome, 'qtd': item['qtd'], 'valor': item['valor']} for nome, item in por_regiao.items()],
+        key=lambda x: x['qtd'], reverse=True,
+    )
+
     # vigência a vencer em 3/6/12 meses
     hoje = datetime.date.today()
     janelas = {
@@ -1773,6 +1890,9 @@ def bi_acordos(filtros=None):
     opcoes_uf = [a.uf for a in db.session.query(Acordo.uf)
                  .filter(Acordo.uf.isnot(None))
                  .distinct().order_by(Acordo.uf).all()]
+    opcoes_coord = [a.unidade_cnpq for a in db.session.query(Acordo.unidade_cnpq)
+                    .filter(Acordo.unidade_cnpq.isnot(None))
+                    .distinct().order_by(Acordo.unidade_cnpq).all()]
     opcoes_ano = sorted({str(ac.data_inicio.year) for ac in acordos if ac.data_inicio}, reverse=True)
 
     return {
@@ -1780,6 +1900,8 @@ def bi_acordos(filtros=None):
         'valor_total_epe': locale.currency(valor_total_epe, symbol=False, grouping=True),
         'situacoes': situacoes,
         'programas': programas,
+        'coordenacoes': coordenacoes,
+        'regioes': regioes,
         'evolucao': evolucao,
         'vigencia_a_vencer': vigencia_a_vencer,
         'mapa_html': gerar_mapa_brasil_acordos(),
@@ -1787,6 +1909,8 @@ def bi_acordos(filtros=None):
         'opcoes_programa': opcoes_programa,
         'opcoes_situacao': opcoes_situacao,
         'opcoes_uf': opcoes_uf,
+        'opcoes_coord': opcoes_coord,
+        'opcoes_regiao': REGIOES,
         'opcoes_ano': opcoes_ano,
     }
 

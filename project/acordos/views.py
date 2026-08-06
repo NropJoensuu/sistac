@@ -99,18 +99,24 @@ acordos = Blueprint('acordos',__name__,
                             template_folder='templates/acordos')
 
 @acordos.route('/<lista>/<coord>/lista_acordos', methods=['GET', 'POST'])
+@login_required
 def lista_acordos(lista,coord):
     """
     +---------------------------------------------------------------------------------------+
-    |Apresenta uma lista dos acordos por edição do programa.                                |
-    |                                                                                       |                                                                                |
+    |Apresenta uma lista dos acordos por edição do programa, com paginação, ordenação por    |
+    |clique no cabeçalho, filtros (situação, EP UF, busca) e exportação CSV respeitando o    |
+    |filtro ativo — mesmo padrão já usado na Gestão de TED/Convênios (item C1 do backlog).   |
     |                                                                                       |
-    |No topo da tela há a opção de se inserir um novo acordo e o número sequencial de cada  |
-    |acordo (#), ao ser clicado, permite que seus dados possam ser editados.                |
-    |                                                                                       |
+    |No topo da tela há a opção de se inserir um novo acordo. O número SEI de cada acordo    |
+    |(coluna "#" — item C2: antes mostrava a posição na lista, identificador instável e que  |
+    |mudava conforme ordenação/filtro), ao ser clicado, permite que seus dados sejam         |
+    |editados.                                                                              |
     +---------------------------------------------------------------------------------------+
     """
-
+    # Bug real corrigido: faltava @login_required nesta rota, mas ela usa
+    # current_user.id incondicionalmente logo abaixo — um acesso anônimo
+    # derrubava a página com AttributeError em vez de redirecionar pro login
+    # (mesmo padrão de bug já encontrado e corrigido em Convênios/B13).
     unidade = db.session.query(User.coord).filter(User.id==current_user.id).first()
 
     form = ListaForm()
@@ -124,16 +130,33 @@ def lista_acordos(lista,coord):
 
         return redirect(url_for('acordos.lista_acordos',lista=lista,coord=coord_form))
 
-    acordos, quantidade, coord_normalizado, data_cha, tem_csv = services.buscar_acordos(lista, coord, unidade.coord)
-    form.coord.data = coord_normalizado
+    filtros = {
+        'situacao': request.args.get('situacao') or None,
+        'uf': request.args.get('uf') or None,
+        'busca': request.args.get('busca') or None,
+    }
+    page = request.args.get('page', 1, type=int)
+    sort = request.args.get('sort') or None
+    direcao = request.args.get('dir') or 'asc'
 
-    return render_template('lista_acordos.html', 
+    acordos, paginacao, coord_normalizado, data_cha, tem_csv = services.buscar_acordos(
+        lista, coord, unidade.coord, filtros=filtros, page=page, sort=sort, direcao=direcao)
+    form.coord.data = coord_normalizado
+    opcoes = services.opcoes_filtro_acordos()
+
+    return render_template('lista_acordos.html',
                            acordos=acordos,
-                           quantidade=quantidade,
+                           quantidade=paginacao['total'],
                            lista=lista,
+                           coord=coord,
                            form=form,
                            data_cha = data_cha,
-                           tem_csv = tem_csv)
+                           tem_csv = tem_csv,
+                           filtros=filtros,
+                           paginacao=paginacao,
+                           sort=sort,
+                           direcao=direcao,
+                           **opcoes)
 
 
 ### VISUALIZAR E ATUALIZAR detalhes de Acordo
@@ -884,9 +907,9 @@ def bi_acordos():
     """
     +---------------------------------------------------------------------------------------+
     |Apresenta a visão consolidada de BI de Acordos: valor CNPq/EPE, distribuição por        |
-    |Programa CNPq, evolução temporal e vigência a vencer. Indicadores que dependem da       |
-    |cadeia processo mãe/filho/chamada/bolsista/pagamento (DW Oracle) ficam sinalizados       |
-    |como pendência na própria tela.                                                          |
+    |Programa CNPq/coordenação do CNPq/região, evolução temporal e vigência a vencer.        |
+    |Indicadores que dependem da cadeia processo mãe/filho/chamada/bolsista/pagamento        |
+    |(DW Oracle) ficam sinalizados como pendência na própria tela.                            |
     |                                                                                         |
     |Rota pública, sem login — controlada apenas pelo interruptor de sistema                |
     |Sistema.bi_acordo (ligado/desligado só pelo admin master).                              |
@@ -899,6 +922,8 @@ def bi_acordos():
         'programa': request.args.get('programa') or None,
         'situacao': request.args.get('situacao') or None,
         'uf': request.args.get('uf') or None,
+        'coord': request.args.get('coord') or None,
+        'regiao': request.args.get('regiao') or None,
         'ano': request.args.get('ano') or None,
     }
 

@@ -1,7 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="jumbotron">
-<h5>Lista de Acordos/TEDs</h5>
+<h5>Lista de Acordos</h5>
+
+  {% macro link_ordenacao(campo, texto) %}
+    {% set nova_dir = 'desc' if (sort == campo and direcao == 'asc') else 'asc' %}
+    {% set args = request.args.to_dict() %}
+    {% set _ = args.update({'sort': campo, 'dir': nova_dir, 'page': 1}) %}
+    <a href="{{ url_for('acordos.lista_acordos', lista=lista, coord=coord, **args) }}" class="text-dark">{{ texto }}{% if sort == campo %} {{ '▲' if direcao == 'asc' else '▼' }}{% endif %}</a>
+  {% endmacro %}
 
       <div class="row">
         {% if current_user.is_authenticated %}
@@ -9,7 +16,7 @@
             <a href="{{url_for('acordos.cria_acordo')}}" class="btn btn-primary active" role="button" aria-pressed="true">Inserir novo</a>
           </div>
           <div class="col">
-            <small class="form-text text-muted">Ou clique em um número de sequência para alterar dados do respectivo acordo.</small>
+            <small class="form-text text-muted">Ou clique no SEI de um acordo para alterar seus dados.</small>
           </div>
         {% endif %}
         {% if lista == 'todos' or lista == 'em execução' %}
@@ -28,6 +35,35 @@
           {% endif %}
       </div>
 <br>
+
+{% if lista == 'todos' or lista == 'em execução' %}
+  <form method="get" class="form-inline mb-3" action="{{ url_for('acordos.lista_acordos', lista=lista, coord=coord) }}">
+    <div class="form-group mr-2 mb-2">
+      <label class="mr-1">Situação:</label>
+      <select class="form-control" name="situacao">
+        <option value="">Todas</option>
+        {% for s in situacoes %}
+          <option value="{{ s }}" {% if filtros.situacao == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group mr-2 mb-2">
+      <label class="mr-1">EP UF:</label>
+      <select class="form-control" name="uf">
+        <option value="">Todas</option>
+        {% for uf in ufs %}
+          <option value="{{ uf }}" {% if filtros.uf == uf %}selected{% endif %}>{{ uf }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group mr-2 mb-2">
+      <label class="mr-1">Buscar:</label>
+      <input class="form-control" type="text" name="busca" value="{{ filtros.busca or '' }}" placeholder="Nome ou SEI do acordo">
+    </div>
+    <button type="submit" class="btn btn-primary mb-2">Filtrar</button>
+    <a href="{{ url_for('acordos.lista_acordos', lista=lista, coord=coord) }}" class="btn btn-outline-secondary mb-2 ml-2">Limpar</a>
+  </form>
+{% endif %}
 
 <caption>
   <div class="row">
@@ -50,10 +86,16 @@
             <span class="text-info font-weight-bold">(Nome {{lista[4:]|replace('#$','/')}})</span>
           {% endif %}
           {% if lista[:2] == 'UF' %}
-            <span class="text-info font-weight-bold">(UF: {{acordos[0][5]}} - Em execução)</span>
+            {# UF vem do próprio parâmetro `lista` (não de acordos[0][5]): bug real corrigido —
+               indexar a lista de resultados quebrava com IndexError quando o filtro não
+               retornava nenhum acordo para a UF selecionada #}
+            <span class="text-info font-weight-bold">(UF: {{lista[2:4]}} - Em execução)</span>
           {% endif %}
           {% if lista[:7] == 'PROG_UF' %}
             <span class="text-info font-weight-bold">(UF: {{lista[7:9]}} - Prog. {{lista[9:]}} - Em execução)</span>
+          {% endif %}
+          {% if paginacao %}
+            <span class="text-muted" style="font-size:0.85rem">— pág. {{ paginacao.page }} de {{ paginacao.pages }}</span>
           {% endif %}
         </p>
       </div>
@@ -73,12 +115,10 @@
 
   </div>
 </caption>
-<div style="overflow-y:auto ; height:450px">
+<div class="table-responsive">
   <table id="table"
         data-toggle="table"
-        data-filter-control="true"
         data-show-search-clear-button="true"
-        data-sortable="true"
         classes="table-sm"
         data-show-columns="true"
         data-show-columns-toggle-all="true"
@@ -86,16 +126,16 @@
     <caption>Acordos</caption>
     <thead>
       <tr>
-        <th scope="col"><p align = "center">#</p></th>
-        <th scope="col"data-field="Unid." data-filter-control="input" data-sortable="true"><p align = "center">Unid.</p></th>
+        <th scope="col"><p align = "center"><abbr title="Número SEI do acordo (item C2: antes mostrava a posição na lista, que mudava conforme ordenação/filtro).">#</abbr></p></th>
+        <th scope="col"><p align = "center">{{ link_ordenacao('unid', 'Unid.') }}</p></th>
         <th scope="col" data-sortable="true"><p align = "center">Progs.</p></th>
-        <th scope="col" data-field="Edição" data-filter-control="input" data-sortable="true"><p align = "center">Nome</p></th>
+        <th scope="col"><p align = "center">{{ link_ordenacao('nome', 'Nome') }}</p></th>
         <th scope="col" data-sortable="true"><p align = "center">SEI</p></th>
-        <th scope="col" data-field="EP UF" data-filter-control="input" data-sortable="true"><p align = "center">EP UF</p></th>
-        <th scope="col" data-field="Situação" data-filter-control="input" data-sortable="true"><p align = "center">Situação</p></th>
-        <th scope="col" data-sortable="true"><p align = "center">Ini.</p></th>
-        <th scope="col" data-sortable="true"><p align = "center">Fim</p></th>
-        <th scope="col"><p align = "center"><abbr title="O valor de bolsas no cadastro do acordo.">CNPq Bolsas (R$)</abbr></p></th>
+        <th scope="col"><p align = "center">{{ link_ordenacao('uf', 'EP UF') }}</p></th>
+        <th scope="col"><p align = "center">{{ link_ordenacao('situacao', 'Situação') }}</p></th>
+        <th scope="col"><p align = "center">{{ link_ordenacao('inicio', 'Ini.') }}</p></th>
+        <th scope="col"><p align = "center">{{ link_ordenacao('fim', 'Fim') }}</p></th>
+        <th scope="col"><p align = "center"><abbr title="O valor de bolsas no cadastro do acordo.">{{ link_ordenacao('bolsas', 'CNPq Bolsas (R$)') }}</abbr></p></th>
         <th scope="col"><p align = "center">Cham./Enc.</p></th>
         <th scope="col"><p align = "center">Processos</p></th>
         <th scope="col"><p align = "center">Filhos</p></th>
@@ -109,10 +149,8 @@
 
       <tr>
         <th scope="row"><p align = "center">
-          {% if (acordos.index(acordo) + 1) <= quantidade %}
-            <a href="{{url_for('acordos.update', acordo_id=acordo[0], lista=lista)}}"><abbr title="Ver detalhes do Acordo">{{acordos.index(acordo) + 1}}</abbr></a>
-          {% endif %}
-        </th>  
+          <a href="{{url_for('acordos.update', acordo_id=acordo[0], lista=lista)}}"><abbr title="Ver detalhes do Acordo">{{ acordo[3] }}</abbr></a>
+        </th>
         <!-- unid -->  
         <td><p align = "center"><small> {{acordo[15]}}</small></p></td>
         <!-- qtd_progs -->
@@ -225,5 +263,28 @@
   </table>
 
 </div>
+
+{% if paginacao and paginacao.pages > 1 %}
+  <ul class="pagination justify-content-center">
+    {% set args_base = request.args.to_dict() %}
+
+    <li class="page-item {% if not paginacao.has_prev %}disabled{% endif %}">
+      {% set args = dict(args_base) %}{% set _ = args.update({'page': paginacao.prev_num}) %}
+      <a class="page-link" href="{{ url_for('acordos.lista_acordos', lista=lista, coord=coord, **args) }}">Anterior</a>
+    </li>
+
+    {% for num in range(1, paginacao.pages + 1) %}
+      {% set args = dict(args_base) %}{% set _ = args.update({'page': num}) %}
+      <li class="page-item {% if num == paginacao.page %}active{% endif %}">
+        <a class="page-link" href="{{ url_for('acordos.lista_acordos', lista=lista, coord=coord, **args) }}">{{ num }}</a>
+      </li>
+    {% endfor %}
+
+    <li class="page-item {% if not paginacao.has_next %}disabled{% endif %}">
+      {% set args = dict(args_base) %}{% set _ = args.update({'page': paginacao.next_num}) %}
+      <a class="page-link" href="{{ url_for('acordos.lista_acordos', lista=lista, coord=coord, **args) }}">Próxima</a>
+    </li>
+  </ul>
+{% endif %}
 
 {% endblock %}
