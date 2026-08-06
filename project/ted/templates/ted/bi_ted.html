@@ -16,7 +16,7 @@
           <select class="form-control" id="orgao" name="orgao">
             <option value="">Todos</option>
             {% for o in opcoes_orgaos %}
-              <option value="{{ o }}" {% if filtros.orgao == o %}selected{% endif %}>{{ o }}</option>
+              <option value="{{ o }}" title="{{ o }}" {% if filtros.orgao == o %}selected{% endif %}>{{ opcoes_orgaos_siglas.get(o) or o }}</option>
             {% endfor %}
           </select>
         </div>
@@ -32,7 +32,7 @@
         </div>
 
         <div class="form-group mr-2 mb-2">
-          <label class="mr-1" for="ano">Ano:</label>
+          <label class="mr-1" for="ano" title="Ano de registro do plano de ação (aa_ano_plano_acao) — não é necessariamente o ano de início de vigência do TED.">Ano: <small>&#9432;</small></label>
           <select class="form-control" id="ano" name="ano">
             <option value="">Todos</option>
             {% for a in opcoes_anos %}
@@ -47,6 +47,16 @@
             <option value="">Todos</option>
             <option value="vinculado" {% if filtros.programa_cnpq == 'vinculado' %}selected{% endif %}>Vinculado</option>
             <option value="pendente" {% if filtros.programa_cnpq == 'pendente' %}selected{% endif %}>Pendente de curadoria</option>
+          </select>
+        </div>
+
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1" for="coord">Coordenação do CNPq:</label>
+          <select class="form-control" id="coord" name="coord">
+            <option value="">Todas</option>
+            {% for c in opcoes_coordenacoes %}
+              <option value="{{ c }}" {% if filtros.coord == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
           </select>
         </div>
 
@@ -102,6 +112,17 @@
             <div class="card-body"><canvas id="chartEvolucao"></canvas></div>
           </div>
         </div>
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-header">
+              TEDs por coordenação do CNPq
+              <small class="text-muted d-block" style="font-size:0.75rem">
+                "Não atribuído" = TED sem nenhuma execução interna registrada ainda (curadoria manual, cobertura parcial)
+              </small>
+            </div>
+            <div class="card-body"><canvas id="chartCoordenacoes"></canvas></div>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -113,6 +134,7 @@
   const situacoes = {{ situacoes | tojson }};
   const orgaos = {{ orgaos | tojson }};
   const evolucao = {{ evolucao | tojson }};
+  const coordenacoes = {{ coordenacoes | tojson }};
 
   new Chart(document.getElementById('chartSituacao'), {
     type: 'doughnut',
@@ -137,6 +159,15 @@
       labels: evolucao.map(e => e.ano),
       datasets: [{ label: 'Valor (R$)', data: evolucao.map(e => e.valor) }],
     },
+  });
+
+  new Chart(document.getElementById('chartCoordenacoes'), {
+    type: 'bar',
+    data: {
+      labels: coordenacoes.map(c => c.coordenacao),
+      datasets: [{ label: 'Quantidade', data: coordenacoes.map(c => c.qtd) }],
+    },
+    options: { indexAxis: 'y' },
   });
 </script>
 {% endblock %}

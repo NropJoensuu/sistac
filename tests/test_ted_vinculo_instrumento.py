@@ -248,7 +248,9 @@ def test_gestao_ted_sem_link_de_vincular_e_com_badges_multiplos(client, app):
         services.vincular_instrumento(id_plano, 'acordo', None, acordo_2, user_id)
 
     _login(client, user_id)
-    resp = client.get('/ted/gestao', query_string={'busca': '950106'})
+    # coord='*' -- o TED de teste não tem execução interna registrada e
+    # ficaria de fora do filtro padrão por coordenação (pedido novo de Igor)
+    resp = client.get('/ted/gestao', query_string={'busca': '950106', 'coord': '*'})
     assert resp.status_code == 200
     assert b'vincula_instrumento' not in resp.data
     assert b'00000.000000/2025-08' in resp.data

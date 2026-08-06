@@ -35,14 +35,39 @@ from project.models import TED_PlanoAcao, Sistema
 ted = Blueprint('ted', __name__, template_folder='templates/ted')
 
 
+def _filtro_coord_padrao():
+    """
+    Resolve o filtro de coordenação da Gestão de TED a partir do parâmetro
+    de rota `coord`, mesmo espírito do valor mágico 'usu'/'*' já usado em
+    Convênios/Acordos (ver coord_do_usuario em project/convenios/services.py),
+    adaptado pro TED — aqui é sigla exata (current_user.coord), sem
+    hierarquia de coordenações filhas, já que TED_Execucao_Interna.coordenacao
+    é preenchida por curadoria manual, avulsa por TED, não por uma cadeia
+    de Programa_Interesse como em Convênios/Acordos.
+
+    Sem `coord` na URL (primeiro acesso), o padrão é 'usu': filtra pela
+    coordenação do usuário logado, deixando de fora os TEDs sem nenhuma
+    execução interna registrada (não triados) — decisão de Igor, ver
+    proposta_melhorias.md. `coord=*` remove o filtro (mostra todos,
+    inclusive os não triados).
+    """
+    coord_param = request.args.get('coord') or 'usu'
+    if coord_param == '*':
+        return None
+    if coord_param == 'usu':
+        return current_user.coord
+    return coord_param
+
+
 @ted.route('/gestao')
 @login_required
 def gestao():
     """
     +---------------------------------------------------------------------------------------+
     |Apresenta a listagem de TEDs do CNPq, com filtros (órgão de origem, situação, Programa |
-    |CNPq, ano, busca) e o estado de curadoria de cada um (execução interna, Programa CNPq, |
-    |Convênio/Acordo vinculado).                                                             |
+    |CNPq, ano, coordenação, busca) e o estado de curadoria de cada um (execução interna,    |
+    |Programa CNPq, Convênio/Acordo vinculado). Sem filtro explícito de coordenação na URL,   |
+    |vem pré-filtrada pela coordenação do usuário logado (pedido de Igor).                    |
     +---------------------------------------------------------------------------------------+
     """
     if current_user.trab_ted != 1:
@@ -54,6 +79,7 @@ def gestao():
         'ano': request.args.get('ano') or None,
         'programa_cnpq': request.args.get('programa_cnpq') or None,
         'busca': request.args.get('busca') or None,
+        'coord': _filtro_coord_padrao(),
     }
     page = request.args.get('page', 1, type=int)
     sort = request.args.get('sort') or None
@@ -62,9 +88,17 @@ def gestao():
     teds, paginacao = services.listar_teds(filtros, page=page, sort=sort, direcao=direcao)
     opcoes = services.opcoes_filtro()
     ultima_carga = services.dados_ultima_carga_ted()
+    total_sem_coordenacao = services.total_teds_sem_coordenacao()
+    # nome diferente do 'coordenacoes' que já vem em **opcoes (esse é só as
+    # coordenações com curadoria já registrada, pro BI) -- aqui é a lista
+    # completa de Coords.sigla, pra dar pra escolher qualquer uma no filtro
+    # da Gestão, mesmo sem nenhum TED curado ainda nela
+    coord_choices = services.coordenacoes_choices()
 
     return render_template('gestao.html', teds=teds, filtros=filtros, paginacao=paginacao,
-                            sort=sort, direcao=direcao, ultima_carga=ultima_carga, **opcoes)
+                            sort=sort, direcao=direcao, ultima_carga=ultima_carga,
+                            total_sem_coordenacao=total_sem_coordenacao,
+                            coord_choices=coord_choices, **opcoes)
 
 
 @ted.route('/carrega', methods=['GET', 'POST'])
@@ -94,7 +128,8 @@ def exporta_csv():
     """
     +---------------------------------------------------------------------------------------+
     |Gera o CSV com o conjunto de TEDs do filtro atual (mesmo padrão de download já usado    |
-    |em Convênios/Acordos) e redireciona pro arquivo estático gerado.                        |
+    |em Convênios/Acordos) e redireciona pro arquivo estático gerado. Mesmo filtro padrão de |
+    |coordenação da tela de Gestão, pra bater com o que está na tela quando o botão é clicado.|
     +---------------------------------------------------------------------------------------+
     """
     if current_user.trab_ted != 1:
@@ -106,6 +141,7 @@ def exporta_csv():
         'ano': request.args.get('ano') or None,
         'programa_cnpq': request.args.get('programa_cnpq') or None,
         'busca': request.args.get('busca') or None,
+        'coord': _filtro_coord_padrao(),
     }
     services.exportar_teds_csv(filtros)
 
@@ -171,11 +207,14 @@ def vincula_programa_cnpq(id_plano_acao):
 def bi_ted():
     """
     +---------------------------------------------------------------------------------------+
-    |Apresenta a visão consolidada de BI de TED: valor por órgão de origem, quantidade por  |
-    |situação, percentual de curadoria (vínculo a Programa CNPq) e evolução temporal.        |
+    |Apresenta a visão consolidada de BI de TED: valor por órgão de origem (sigla), quantidade|
+    |por situação e por coordenação do CNPq, percentual de curadoria (vínculo a Programa      |
+    |CNPq) e evolução temporal.                                                               |
     |                                                                                         |
     |Rota pública, sem login — controlada apenas pelo interruptor de sistema                |
-    |Sistema.bi_ted (ligado/desligado só pelo admin master).                                 |
+    |Sistema.bi_ted (ligado/desligado só pelo admin master). Por isso o filtro de coordenação |
+    |aqui é uma sigla exata escolhida no <select> — sem o valor mágico 'usu' da Gestão, que    |
+    |depende de current_user (visitante anônimo não tem coordenação).                         |
     +---------------------------------------------------------------------------------------+
     """
     if Sistema.query.first().bi_ted != 1:
@@ -186,6 +225,7 @@ def bi_ted():
         'situacao': request.args.get('situacao') or None,
         'ano': request.args.get('ano') or None,
         'programa_cnpq': request.args.get('programa_cnpq') or None,
+        'coord': request.args.get('coord') or None,
     }
 
     dados = services.bi_ted(filtros)

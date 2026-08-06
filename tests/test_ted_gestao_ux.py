@@ -71,11 +71,15 @@ def test_paginacao_segunda_pagina_traz_o_restante(client, app):
 
     _login(client, user_id)
 
-    resp1 = client.get('/ted/gestao', query_string={'orgao': 'PAGINACAOTESTE', 'page': 1})
+    # coord='*' -- os TEDs sintéticos deste teste não têm execução interna
+    # registrada, então ficariam de fora do filtro padrão por coordenação
+    # (pedido novo de Igor); coord='*' os traz de volta pra não interferir
+    # no que este teste cobre de fato (paginação)
+    resp1 = client.get('/ted/gestao', query_string={'orgao': 'PAGINACAOTESTE', 'page': 1, 'coord': '*'})
     assert resp1.status_code == 200
     texto1 = resp1.get_data(as_text=True)
 
-    resp2 = client.get('/ted/gestao', query_string={'orgao': 'PAGINACAOTESTE', 'page': 2})
+    resp2 = client.get('/ted/gestao', query_string={'orgao': 'PAGINACAOTESTE', 'page': 2, 'coord': '*'})
     assert resp2.status_code == 200
     texto2 = resp2.get_data(as_text=True)
 

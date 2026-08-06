@@ -27,6 +27,14 @@
         </div>
       </div>
 
+      {% if total_sem_coordenacao and total_sem_coordenacao > 0 %}
+        {% set args_todos = request.args.to_dict() %}{% set _ = args_todos.update({'coord': '*'}) %}
+        <div class="alert alert-warning" role="alert">
+          Há TED a ser alocado em coordenação, veja se não é da sua coordenação.
+          <a href="{{ url_for('ted.gestao', **args_todos) }}">Ver todos (inclusive os não triados)</a>
+        </div>
+      {% endif %}
+
       <form method="get" class="form-inline mb-4" action="{{ url_for('ted.gestao') }}">
         <div class="form-group mr-2 mb-2">
           <label class="mr-1">Órgão de origem:</label>
@@ -61,6 +69,20 @@
             <option value="">Todos</option>
             <option value="vinculado" {% if filtros.programa_cnpq == 'vinculado' %}selected{% endif %}>Vinculado</option>
             <option value="pendente" {% if filtros.programa_cnpq == 'pendente' %}selected{% endif %}>Pendente de curadoria</option>
+          </select>
+        </div>
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">Coordenação:</label>
+          {# value="*" (não "") pra "Todos" -- vazio já tem outro significado
+             nesse filtro (cai no padrão 'usu', a coordenação do usuário),
+             mesmo valor mágico do link "Ver todos" do aviso acima #}
+          <select class="form-control" name="coord">
+            <option value="*" {% if filtros.coord is none %}selected{% endif %}>Todos</option>
+            {% for valor, rotulo in coord_choices %}
+              {% if valor %}
+                <option value="{{ valor }}" {% if filtros.coord == valor %}selected{% endif %}>{{ rotulo }}</option>
+              {% endif %}
+            {% endfor %}
           </select>
         </div>
         <div class="form-group mr-2 mb-2">

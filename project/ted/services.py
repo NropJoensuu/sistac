@@ -202,8 +202,15 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
     devolveria páginas com contagem errada).
 
     `sort` (um dos campos de _CHAVES_ORDENACAO) e `direcao` ('asc'/'desc')
-    reordenam o resultado; sem `sort`, mantém a ordem padrão (ano desc,
-    já aplicada na consulta).
+    reordenam o resultado; sem `sort`, mantém a ordem padrão (pedido de
+    Igor: vigência fim ascendente — quem vence primeiro no topo —, com
+    `NULLS LAST` explícito pra quem não tem data de fim não subir pro
+    topo, já aplicada na consulta).
+
+    `filtros['coord']`, quando presente, é uma sigla exata de coordenação
+    (sem "valor mágico" tipo 'usu'/'*' — essa resolução é feita por quem
+    chama, na view) — mantém só os TEDs com pelo menos uma execução
+    interna registrada nessa coordenação.
     """
     filtros = filtros or {}
 
@@ -223,12 +230,12 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
             TED_PlanoAcao.objeto.ilike(termo),
         ))
 
-    # tiebreaker por id: sem ele, empates em 'ano' (a maioria dos TEDs, já que
-    # há poucos anos distintos) deixam a ordem entre duas execuções da mesma
-    # query sujeita ao plano de execução do Postgres — não garantida estável.
-    # Bug real encontrado via teste: paginação podia repetir/pular TEDs entre
-    # página 1 e 2 quando isso acontecia.
-    linhas = query.order_by(TED_PlanoAcao.ano.desc(), TED_PlanoAcao.id.asc()).all()
+    # tiebreaker por id: sem ele, empates em vigencia_fim (inclusive os vários
+    # None, todos empurrados pro fim por nullslast()) deixam a ordem entre
+    # duas execuções da mesma query sujeita ao plano de execução do Postgres
+    # — não garantida estável. Bug real encontrado via teste: paginação podia
+    # repetir/pular TEDs entre página 1 e 2 quando isso acontecia.
+    linhas = query.order_by(TED_PlanoAcao.vigencia_fim.asc().nullslast(), TED_PlanoAcao.id.asc()).all()
 
     ids_plano = [p.id for p, _ in linhas]
     situacoes_termo = {
@@ -266,6 +273,12 @@ def listar_teds(filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
         linhas = [(p, prog) for p, prog in linhas if p.id in programas_vinculados]
     elif filtros.get('programa_cnpq') == 'pendente':
         linhas = [(p, prog) for p, prog in linhas if p.id not in programas_vinculados]
+
+    if filtros.get('coord'):
+        linhas = [
+            (p, prog) for p, prog in linhas
+            if filtros['coord'] in {e.coordenacao for e in execucoes_por_plano.get(p.id, [])}
+        ]
 
     hoje = dt.date.today()
 
@@ -370,7 +383,25 @@ def opcoes_filtro():
     anos = [a.ano for a in db.session.query(TED_PlanoAcao.ano)
             .filter(TED_PlanoAcao.ano.isnot(None), TED_PlanoAcao.ano != '')
             .distinct().order_by(TED_PlanoAcao.ano.desc()).all()]
-    return {'orgaos': orgaos, 'orgaos_siglas': orgaos_siglas, 'situacoes': situacoes, 'anos': anos}
+    coordenacoes = [c.coordenacao for c in db.session.query(TED_Execucao_Interna.coordenacao)
+                    .filter(TED_Execucao_Interna.coordenacao.isnot(None))
+                    .distinct().order_by(TED_Execucao_Interna.coordenacao).all()]
+    return {
+        'orgaos': orgaos, 'orgaos_siglas': orgaos_siglas, 'situacoes': situacoes, 'anos': anos,
+        'coordenacoes': coordenacoes,
+    }
+
+
+def total_teds_sem_coordenacao():
+    """
+    Quantidade de TEDs sem nenhuma execução interna registrada (não
+    triados) no sistema todo — não só na página/filtro atual. Usado pro
+    aviso da tela de Gestão (pedido de Igor): como o filtro padrão passou
+    a excluir os não triados, precisa ficar claro que eles existem e
+    onde ver, sem afrouxar o filtro em si.
+    """
+    triados = db.session.query(TED_Execucao_Interna.id_plano_acao).distinct()
+    return TED_PlanoAcao.query.filter(~TED_PlanoAcao.id.in_(triados)).count()
 
 
 def coordenacoes_choices():
@@ -533,8 +564,10 @@ def bi_ted(filtros=None):
     """
     Monta os indicadores da tela de BI de TED (Etapa 3 do roadmap de BI):
     valor total por órgão de origem (no lugar de UF — TED não tem UF
-    associada), quantidade por situação, percentual de curadoria (TEDs
-    já vinculados a um Programa CNPq) e evolução temporal por ano.
+    associada, exibido pela sigla — item A8), quantidade por situação,
+    quantidade/valor por coordenação do CNPq (item A7), percentual de
+    curadoria (TEDs já vinculados a um Programa CNPq) e evolução
+    temporal por ano.
 
     Reaproveita listar_teds(filtros) — mesma consulta/filtragem/curadoria
     já usada na tela de Gestão — e agrega em Python, em vez de duplicar
@@ -548,6 +581,7 @@ def bi_ted(filtros=None):
     por_orgao = {}
     por_situacao = {}
     por_ano = {}
+    por_coord = {}
 
     for item in itens:
         plano = item['plano']
@@ -557,7 +591,7 @@ def bi_ted(filtros=None):
         if item['programa_cnpq_nome']:
             vinculados += 1
 
-        orgao = item['programa'].unidade_descentralizadora if item['programa'] else 'Não informado'
+        orgao = sigla_ou_nome_orgao(item['programa']) or 'Não informado'
         item_orgao = por_orgao.setdefault(orgao, {'qtd': 0, 'valor': 0.0})
         item_orgao['qtd'] += 1
         item_orgao['valor'] += valor
@@ -571,6 +605,21 @@ def bi_ted(filtros=None):
         item_ano = por_ano.setdefault(ano, {'qtd': 0, 'valor': 0.0})
         item_ano['qtd'] += 1
         item_ano['valor'] += valor
+
+        # a coordenação só existe pra TEDs com execução interna já registrada
+        # (curadoria manual, cobertura parcial — mesmo percentual_curadoria
+        # de baixo); em vez de excluir da contagem, os sem coordenação viram
+        # o balde "Não atribuído" (mesmo espírito de honestidade sobre
+        # cobertura incompleta já aplicado no resto do BI). Um TED pode ter
+        # mais de uma coordenação (várias execuções internas) — cada uma
+        # soma nesse balde, então a soma de qtd por coordenação pode passar
+        # do total de TEDs; valor_total/quantidade_total acima não usam
+        # por_coord, então não são afetados por essa contagem múltipla.
+        coords_item = item['coordenacoes'] or ['Não atribuído']
+        for coord in coords_item:
+            item_coord = por_coord.setdefault(coord, {'qtd': 0, 'valor': 0.0})
+            item_coord['qtd'] += 1
+            item_coord['valor'] += valor
 
     total = len(itens)
     percentual_curadoria = round(100 * vinculados / total) if total else 0
@@ -587,10 +636,15 @@ def bi_ted(filtros=None):
         [{'ano': ano, 'qtd': i['qtd'], 'valor': i['valor']} for ano, i in por_ano.items()],
         key=lambda x: x['ano'],
     )
+    coordenacoes = sorted(
+        [{'coordenacao': nome, 'qtd': i['qtd'], 'valor': i['valor']} for nome, i in por_coord.items()],
+        key=lambda x: x['qtd'], reverse=True,
+    )
 
-    # opcoes_filtro() usa as chaves 'orgaos'/'situacoes'/'anos' pras opções de
-    # <select> (listas de strings) — nomes diferentes das chaves acima
-    # (dados agregados pros gráficos), pra não colidir na hora de montar o retorno
+    # opcoes_filtro() usa as chaves 'orgaos'/'situacoes'/'anos'/'coordenacoes'
+    # pras opções de <select> (listas de strings) — nomes diferentes das
+    # chaves acima (dados agregados pros gráficos), pra não colidir na hora
+    # de montar o retorno
     opcoes = opcoes_filtro()
 
     return {
@@ -601,7 +655,10 @@ def bi_ted(filtros=None):
         'orgaos': orgaos,
         'situacoes': situacoes,
         'evolucao': evolucao,
+        'coordenacoes': coordenacoes,
         'opcoes_orgaos': opcoes['orgaos'],
+        'opcoes_orgaos_siglas': opcoes['orgaos_siglas'],
         'opcoes_situacoes': opcoes['situacoes'],
         'opcoes_anos': opcoes['anos'],
+        'opcoes_coordenacoes': opcoes['coordenacoes'],
     }

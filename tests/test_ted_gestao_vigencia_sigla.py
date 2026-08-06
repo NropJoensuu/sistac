@@ -174,7 +174,11 @@ def test_cores_das_tres_faixas_aparecem_na_tela(client, app):
         _plano(94042, 94004, 'VIGD075', vigencia_fim=hoje + timedelta(days=75))
 
     _login(client, user_id)
-    resp = client.get('/ted/gestao', query_string={'orgao': 'Ministério da Saúde'})
+    # coord='*' -- os TEDs de teste não têm execução interna registrada
+    # (não triados) e ficariam de fora do filtro padrão por coordenação
+    # (pedido novo de Igor, ver proposta_melhorias.md); coord='*' os traz
+    # de volta, sem interferir no que este teste está de fato cobrindo (A4)
+    resp = client.get('/ted/gestao', query_string={'orgao': 'Ministério da Saúde', 'coord': '*'})
     assert resp.status_code == 200
     texto = resp.get_data(as_text=True)
 
@@ -255,7 +259,10 @@ def test_tela_mostra_sigla_no_lugar_do_nome_completo(client, app):
         _plano(94070, 94007, 'VIGE001')
 
     _login(client, user_id)
-    resp = client.get('/ted/gestao', query_string={'orgao': 'Ministério da Ciência, Tecnologia e Inovações'})
+    # coord='*' pelo mesmo motivo do teste de A4 acima -- ver comentário lá
+    resp = client.get('/ted/gestao', query_string={
+        'orgao': 'Ministério da Ciência, Tecnologia e Inovações', 'coord': '*',
+    })
     assert resp.status_code == 200
     texto = resp.get_data(as_text=True)
 
