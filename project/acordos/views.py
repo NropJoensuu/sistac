@@ -803,13 +803,24 @@ def lista_processos_filho(proc_mae):
                                                         max_ult_pag=max_ult_pag)
 
 #
-@acordos.route("/<proc_mae>/<edic>/<epe>/<uf>/carrega_sit_sigef", methods=['GET', 'POST'])
-def carrega_sit_sigef(proc_mae,edic,epe,uf):
+@acordos.route("/carrega_sit_sigef", methods=['GET', 'POST'])
+@login_required
+def carrega_sit_sigef():
     """
     +---------------------------------------------------------------------------------------+
     |Carrega situações dos processos-filho obtidas de uma planilha gerada via sigef         |
     +---------------------------------------------------------------------------------------+
     """
+    # Bug real corrigido: faltava @login_required nesta rota, mas ela usa
+    # current_user.id incondicionalmente no registra_log_auto abaixo — mesmo
+    # padrão de bug já encontrado em lista_acordos/Convênios-B13.
+    #
+    # Rota simplificada: antes exigia proc_mae/edic/epe/uf na URL, mas
+    # cargaSit() atualiza todos os processos-filho encontrados na planilha,
+    # não é filtrada por um proc_mae específico — edic/epe/uf nunca eram
+    # usados no corpo da função, e proc_mae só servia pra escolher o
+    # redirect final. Sem esses parâmetros, dá pra acessar a carga
+    # diretamente pelo menu (mesmo padrão de PDCTR/SICONV/TED).
 
     form =  ArquivoForm()
 
@@ -824,7 +835,7 @@ def carrega_sit_sigef(proc_mae,edic,epe,uf):
 
         registra_log_auto(current_user.id,None,'car')
 
-        return redirect(url_for('acordos.lista_processos_filho', proc_mae=proc_mae))
+        return redirect(url_for('core.inicio'))
 
     return render_template('grab_file.html',form=form,data_ref="sigef")
 

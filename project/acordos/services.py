@@ -15,7 +15,7 @@ import math
 import datetime
 from datetime import datetime as dt
 
-import xlrd
+import openpyxl
 from dateutil.rrule import rrule, MONTHLY
 from folium import Map, Circle, Popup
 from werkzeug.utils import secure_filename
@@ -398,22 +398,31 @@ def cargaSit(entrada):
     print('\n')
     print('<<', dt.now().strftime("%x %X"), '>> ', ' Carga de arquivo de situações de processos-filho iniciada...')
 
-    book = xlrd.open_workbook(filename=entrada, ragged_rows=True)
-    planilha = book.sheet_by_index(0)
+    # abre arquivo (book) e planilha (sheet) via openpyxl — lê .xlsx.
+    # (o xlrd usado antes só lê o formato antigo .xls, mesmo bug já
+    # corrigido no cargaPDCTR)
+    book = openpyxl.load_workbook(filename=entrada, data_only=True, read_only=True)
+    planilha = book.worksheets[0]
 
-    linha_cabeçalho = planilha.row_values(0, start_colx=0, end_colx=None)
+    linhas_planilha = list(planilha.iter_rows(values_only=True))
+
+    linha_cabeçalho = list(linhas_planilha[0])
 
     print('Planilha: SIGEF')
     print(f'Cabeçalho original: {len(linha_cabeçalho)} campos')
-    print(f'Quantidade de registros na planilha: {planilha.nrows - 1}')
+    print(f'Quantidade de registros na planilha: {len(linhas_planilha) - 1}')
     print('\n')
 
-    qtd_linhas = planilha.nrows - 1
+    qtd_linhas = len(linhas_planilha) - 1
+
+    idx_proc = linha_cabeçalho.index('Processo')
+    idx_sit = linha_cabeçalho.index('Situação')
 
     for i in range(qtd_linhas):
 
-        proc = planilha.cell_value(i + 1, linha_cabeçalho.index('Processo'))
-        sit = planilha.cell_value(i + 1, linha_cabeçalho.index('Situação'))
+        linha = linhas_planilha[i + 1]
+        proc = linha[idx_proc]
+        sit = linha[idx_sit]
 
         processo_filho = db.session.query(Processo_Filho).filter(Processo_Filho.processo == proc).all()
 

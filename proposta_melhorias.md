@@ -196,3 +196,111 @@ Duas sugestões de ajuste **dentro** dessa ordem:
 
 Fora isso, a ordem proposta está boa — trato como confirmada, a menos que
 você quera ajustar.
+
+---
+
+## Nota de correção — "257 de 303 Acordos com capital/custeio None" (06/08/2026)
+
+Esse número foi medido no **banco de desenvolvimento**, não confirmado em
+produção. Igor esclareceu: a população desses campos depende de curadoria/
+carga de bolsas que só é feita manualmente com o tempo — o ambiente de dev
+não passou por esse processo, então o número alto é característica do
+banco de teste, não necessariamente do estado real de produção. A correção
+do bug (`campo or 0` em vez de deixar quebrar) continua válida de qualquer
+forma, como proteção defensiva — um campo `None` sempre pode voltar a
+acontecer (import novo, edição incompleta), independente da causa raiz.
+
+## Achado — comparação DW × planilha de bolsas (06/08/2026)
+
+Investigado a pedido de Igor: os campos que a consulta DW (`consultaDW`,
+tipo `'filhos_chamadas'`) busca **não são os mesmos** da planilha de
+bolsas ("05-2026 - Bolsas.xlsx", carregada via `cargaPDCTR`). Há
+sobreposição real (Processo, Nome, CPF, Situação, datas, Processo Mãe,
+Nome da Chamada, Modalidade, Nível, Cod Programa), mas:
+
+- **A planilha é por pagamento** (uma linha por mês pago); **o DW já vem
+  agregado** (`SUM` por processo — `PAGO_BOLSAS`/`PAGO_CAPITAL`/
+  `PAGO_CUSTEIO`).
+- **Só a planilha tem**: contexto institucional/geográfico completo (Cod
+  Inst, Nome da Instituição, Sigla, UF, Região, Cidade, País), hierarquia
+  organizacional (Diretoria, Coordenação-Geral, Coordenação, Comitê),
+  Sigla da Chamada, Demanda/Natureza da Demanda, descrição da modalidade
+  (o DW só tem o código), nome do Programa (idem), Grande Área/Área de
+  Conhecimento, dados do Coordenador, detalhamento de pagamento (data,
+  tipo, moeda, taxa de bancada, prêmio, taxa escolar).
+- **Só o DW tem** (consulta `filhos_chamadas`): `ESTADO_FOMENTO`,
+  `QTD_BOLSAS` (soma de bolsas pagas *daquele processo-filho específico*,
+  não contagem de filhos), `DTA_CARGA` (data de carga do próprio DW).
+- **Atenção, não confundir dois campos parecidos de consultas diferentes**:
+  `QTD_FILHOS` (consulta `processos_chamadas`, nível mãe) é quem de fato
+  conta processos-filho distintos por processo-mãe
+  (`COUNT(DISTINCT COD_PROC)` agrupado por `COD_PROC_MAE`). `QTD_BOLSAS`
+  (consulta `filhos_chamadas`, nível filho) é outra coisa — soma de
+  `FT_PAGAMENTO.QTD_BOLSAS` daquele filho, mais parecido com `mens_pagas`
+  de `Processo_Filho`.
+
+**Hipóteses de Igor sobre os campos do DW, com anotação**:
+- `ESTADO_FOMENTO` ≈ situação do SIGEF: plausível conceitualmente (os dois
+  tratam do "estado" do processo), mas **não confirmado** — não há como
+  verificar sem comparar dado real do DW lado a lado com uma carga SIGEF
+- `DTA_CARGA`: ao espelhar localmente, usar a data do commit/sincronização
+  local (não a data de carga do DW em si) — combinado
+
+**Conclusão**: as duas fontes não são substituíveis uma pela outra sem
+perda de informação. A planilha tem mais contexto institucional/geográfico
+(mais útil pro BI territorial); o DW vem oficial e agregado, sem depender
+de exportação manual.
+
+## Achado — carga de situações via SIGEF (06/08/2026) — ✅ resolvido
+
+Existe integração com o SIGEF, mas — como o PDCTR — é **manual, via
+upload de planilha**, não uma consulta em tempo real. Rota
+`/acordos/carrega_sit_sigef`, função `cargaSit()`
+(`project/acordos/services.py`): lê só 2 colunas da planilha ("Processo",
+"Situação") e atualiza o campo `situ_filho` dos registros já existentes em
+`Processo_Filho` e `PagamentosPDCTR` — não cria dado novo, só sincroniza
+status.
+
+**Bug confirmado e corrigido**: `cargaSit()` usava `xlrd.open_workbook()`
+— a mesma biblioteca que só lê `.xls` antigo, não `.xlsx`, já corrigida no
+`cargaPDCTR` mas não replicada aqui. Migrada pro mesmo padrão com
+`openpyxl` (`load_workbook(..., read_only=True)` +
+`iter_rows(values_only=True)`), mantendo a lógica de negócio idêntica.
+`import xlrd` removido do módulo (não era mais usado em nenhum outro
+lugar). Teste de regressão em
+`tests/test_acordos_carga_sit.py::test_cargaSit_le_xlsx_e_atualiza_situacao`.
+
+Ao revisar a rota, dois bugs reais adicionais encontrados e corrigidos:
+- Faltava `@login_required` em `carrega_sit_sigef`, mas a rota usa
+  `current_user.id` incondicionalmente (mesmo padrão de bug já visto em
+  `lista_acordos`/Convênios-B13) — um acesso anônimo quebrava com
+  `AttributeError` em vez de redirecionar pro login.
+- A rota exigia `proc_mae`/`edic`/`epe`/`uf` na URL, mas `edic`/`epe`/`uf`
+  nunca eram usados no corpo da função, e `cargaSit()` não é filtrada por
+  um `proc_mae` — ela atualiza todos os processos-filho encontrados na
+  planilha. `proc_mae` só servia pra escolher o destino do redirect final.
+  Parâmetros removidos da rota (`/acordos/carrega_sit_sigef`, sem
+  argumentos), redirect ajustado pra `core.inicio` (mesmo padrão do
+  PDCTR) — não precisa mais de tela intermediária pedindo esses dados.
+
+## Achado — PDCTR e SIGEF sem acesso pelo menu (06/08/2026) — ✅ resolvido
+
+Confirmado: nem `/carregaPDCTR` nem `/carrega_sit_sigef` tinham link no
+menu — só acessíveis digitando a URL direto, mesmo problema já visto
+antes com o PDCTR sozinho. **Pedido de Igor**: as duas cargas devem ficar
+acessíveis no contexto de usuários admin (menu Carga, mesmo padrão das
+outras cargas do sistema — SICONV, DW, TED).
+
+Adicionados os dois links no dropdown "Carga" (`project/templates/base.html`),
+dentro do bloco `{% if current_user.trab_acordo == 1 %}` (mesma permissão
+dos outros itens de carga do módulo Acordos: Pega Programas/Chamadas/
+Financeiro DW), antes do divisor que separa do bloco de Convênios.
+
+## Novo item de produto — menu "Instrumentos" vira "Ações" (06/08/2026)
+
+Proposta de Igor, registrada para avaliação futura (não implementada
+ainda): substituir o menu "Instrumentos" por "Ações", trazendo as
+informações de Chamadas — permitindo ver ações que não envolvem Acordo,
+Convênio nem TED. Precisa de desenho funcional antes de implementar (o
+que exatamente aparece nessa tela, de onde vêm os dados de Chamadas sem
+instrumento associado).
