@@ -405,7 +405,7 @@ def detalhes_convenio(conv, dados_sei):
 
         crono_desemb_l.append([
             parcela.NR_PARCELA_CRONO_DESEMBOLSO, data_repasse, parcela.TIPO_RESP_CRONO_DESEMBOLSO,
-            locale.currency(parcela.VALOR_PARCELA_CRONO_DESEMBOLSO, symbol=False, grouping=True),
+            locale.currency(parcela.VALOR_PARCELA_CRONO_DESEMBOLSO or 0, symbol=False, grouping=True),
             sit, atraso, data_prorrog, data_ref_atraso,
         ])
 
@@ -414,21 +414,23 @@ def detalhes_convenio(conv, dados_sei):
     crono_desemb = list(enumerate(crono_desemb_l, 1))
 
     # valores formatados e percentuais
-    VL_GLOBAL_CONV = locale.currency(convenio.VL_GLOBAL_CONV, symbol=False, grouping=True)
+    # mesmo bug legado do update() de Acordo (dado antigo/importado do SICONV
+    # pode ter esses campos None no banco): tratar como zero pra não quebrar a tela
+    VL_GLOBAL_CONV = locale.currency(convenio.VL_GLOBAL_CONV or 0, symbol=False, grouping=True)
 
     percent_desemb_repass = 0 if not convenio.VL_REPASSE_CONV else round(100 * convenio.VL_DESEMBOLSADO_CONV / convenio.VL_REPASSE_CONV)
     percent_ingre_contrap = 0 if not convenio.VL_CONTRAPARTIDA_CONV else round(100 * convenio.VL_INGRESSO_CONTRAPARTIDA / convenio.VL_CONTRAPARTIDA_CONV)
     percent_empen_repass = 0 if not convenio.VL_REPASSE_CONV else round(100 * convenio.VL_EMPENHADO_CONV / convenio.VL_REPASSE_CONV)
 
-    VL_REPASSE_CONV = locale.currency(convenio.VL_REPASSE_CONV, symbol=False, grouping=True)
-    VL_DESEMBOLSADO_CONV = locale.currency(convenio.VL_DESEMBOLSADO_CONV, symbol=False, grouping=True)
-    VL_EMPENHADO_CONV = locale.currency(convenio.VL_EMPENHADO_CONV, symbol=False, grouping=True)
-    VL_CONTRAPARTIDA_CONV = locale.currency(convenio.VL_CONTRAPARTIDA_CONV, symbol=False, grouping=True)
-    VL_INGRESSO_CONTRAPARTIDA = locale.currency(convenio.VL_INGRESSO_CONTRAPARTIDA, symbol=False, grouping=True)
-    VL_RENDIMENTO_APLICACAO = locale.currency(convenio.VL_RENDIMENTO_APLICACAO, symbol=False, grouping=True)
+    VL_REPASSE_CONV = locale.currency(convenio.VL_REPASSE_CONV or 0, symbol=False, grouping=True)
+    VL_DESEMBOLSADO_CONV = locale.currency(convenio.VL_DESEMBOLSADO_CONV or 0, symbol=False, grouping=True)
+    VL_EMPENHADO_CONV = locale.currency(convenio.VL_EMPENHADO_CONV or 0, symbol=False, grouping=True)
+    VL_CONTRAPARTIDA_CONV = locale.currency(convenio.VL_CONTRAPARTIDA_CONV or 0, symbol=False, grouping=True)
+    VL_INGRESSO_CONTRAPARTIDA = locale.currency(convenio.VL_INGRESSO_CONTRAPARTIDA or 0, symbol=False, grouping=True)
+    VL_RENDIMENTO_APLICACAO = locale.currency(convenio.VL_RENDIMENTO_APLICACAO or 0, symbol=False, grouping=True)
 
-    vl_a_empenhar = locale.currency(convenio.VL_REPASSE_CONV - convenio.VL_EMPENHADO_CONV, symbol=False, grouping=True)
-    vl_a_desembolsar = locale.currency(convenio.VL_REPASSE_CONV - convenio.VL_DESEMBOLSADO_CONV, symbol=False, grouping=True)
+    vl_a_empenhar = locale.currency((convenio.VL_REPASSE_CONV or 0) - (convenio.VL_EMPENHADO_CONV or 0), symbol=False, grouping=True)
+    vl_a_desembolsar = locale.currency((convenio.VL_REPASSE_CONV or 0) - (convenio.VL_DESEMBOLSADO_CONV or 0), symbol=False, grouping=True)
 
     pagamento_s = []
     pag_tot = 0
@@ -496,7 +498,7 @@ def detalhes_convenio(conv, dados_sei):
         'qtd_pag': qtd_pag,
         'pag_tot': locale.currency(pag_tot, symbol=False, grouping=True),
         'emp_tot': locale.currency(emp_total, symbol=False, grouping=True),
-        'desemb_tot': locale.currency(convenio.VL_DESEMBOLSADO_CONV, symbol=False, grouping=True),
+        'desemb_tot': locale.currency(convenio.VL_DESEMBOLSADO_CONV or 0, symbol=False, grouping=True),
         'chamadas': chamadas_s,
         'qtd_chamadas': qtd_chamadas,
         'qtd_proj': qtd_proj,

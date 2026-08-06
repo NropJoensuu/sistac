@@ -158,6 +158,34 @@ def test_update_acordo_responde_200(client, app):
     assert resp.status_code == 200
 
 
+def test_update_acordo_com_capital_none_nao_quebra(client, app):
+    """
+    Regressão do bug relatado por Igor: acessar a tela de edição de um
+    Acordo com algum dos campos monetários (valor_cnpq, valor_epe, capital,
+    custeio, bolsas) None no banco (dado legado, existe desde o commit
+    inicial do projeto) quebrava com `TypeError: bad operand type for
+    abs(): 'NoneType'` em locale.currency(None, ...).
+    """
+    user_id = _usuario(app, 'teste.updateacordonone@teste.com', 'usuarioupdateacordononeteste')
+    with app.app_context():
+        acordo = Acordo.query.filter_by(sei='00000.000000/2024-33').first()
+        if acordo is None:
+            acordo = Acordo(
+                nome='Acordo Teste Capital None', sei='00000.000000/2024-33', epe='EPE', uf='DF',
+                data_inicio=date(2024, 1, 1), data_fim=date(2026, 12, 31), valor_cnpq=1000.0,
+                valor_epe=1000.0, unidade_cnpq='DPI', situ='Assinado', desc='teste',
+                capital=None, custeio=0.0, bolsas=0.0, siafi='333',
+            )
+            db.session.add(acordo)
+            db.session.commit()
+        acordo_id = acordo.id
+
+    _login(client, user_id)
+    resp = client.get(f"/acordos/{acordo_id}/todos/update")
+    assert resp.status_code == 200
+    assert '0,00'.encode() in resp.data
+
+
 def test_cria_acordo_get_responde_200(client, app):
     user_id = _usuario(app, 'teste.criaacordo@teste.com', 'usuariocriaacordoteste')
     _login(client, user_id)

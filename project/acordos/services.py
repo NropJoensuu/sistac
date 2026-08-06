@@ -1339,10 +1339,12 @@ def _formata_lista_acordos(acordos_v):
         else:
             dias = 999
 
-        valor_global = acordo.valor_epe + acordo.valor_cnpq
+        # mesmo bug legado do update() de Acordo (dado antigo pode ter esses
+        # campos None no banco): tratar como zero pra não quebrar a listagem
+        valor_global = (acordo.valor_epe or 0) + (acordo.valor_cnpq or 0)
         valor_cnpq = acordo.valor_cnpq
         valor_bolsas = acordo.bolsas
-        valor_epe = locale.currency(acordo.valor_epe, symbol=False, grouping=True)
+        valor_epe = locale.currency(acordo.valor_epe or 0, symbol=False, grouping=True)
 
         procs_mae = db.session.query(Acordo_ProcMae.proc_mae_id,
                                      Processo_Mae.proc_mae,

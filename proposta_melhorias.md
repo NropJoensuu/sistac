@@ -19,6 +19,23 @@ incorporar o backlog detalhado de refinamento pós-BI.
   automática de dados persistentes/singleton nos testes (item 8 antigo).
 - **Dados**: carga real de bolsistas (53.817 pagamentos, via `cargaPDCTR`
   migrado pra `.xlsx`).
+- **Bug — `TypeError` na edição de Acordo/Convênio com valor monetário
+  `None`** (reportado por Igor, 06/08/2026): `/acordos/{id}/{lista}/update`
+  quebrava com `TypeError: bad operand type for abs(): 'NoneType'` ao
+  chamar `locale.currency(None, ...)` para Acordos com `valor_cnpq`,
+  `valor_epe`, `capital`, `custeio` ou `bolsas` nulos no banco — dado
+  legado, padrão existe desde o commit inicial do projeto (19/08/2022).
+  257 dos 303 Acordos hoje têm `capital`/`custeio` `None` (os outros 3
+  campos nunca são `None` na base atual). Corrigido tratando `None` como
+  zero (`campo or 0`) em `project/acordos/views.py` (`update()`) e
+  `project/acordos/services.py` (`_formata_lista_acordos`, mesmo padrão,
+  mesmos campos). Mesmo padrão também encontrado e corrigido em
+  `project/convenios/services.py` (`detalhes_convenio()`, campos
+  `VL_*_CONV` e `VALOR_PARCELA_CRONO_DESEMBOLSO`) — dado importado do
+  SICONV/Transferegov, mesmo risco de nulo. TED já tratava `None`
+  corretamente (`or 0` já presente). Não corrigido o dado em si, só o
+  comportamento da tela. Teste de regressão em
+  `tests/test_acordos_nucleo.py::test_update_acordo_com_capital_none_nao_quebra`.
 
 ---
 
@@ -157,7 +174,7 @@ pontuais dali em diante. Fica a critério de Igor.
 
 ---
 
-## Sugestão de sequenciamento (Claude)
+## Sugestão de sequenciamento
 
 A ordem por módulo (TED → Convênios → Acordos) faz sentido e mantenho.
 Duas sugestões de ajuste **dentro** dessa ordem:

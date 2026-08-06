@@ -229,16 +229,19 @@ def update(acordo_id,lista):
     form.uf.data          = acordo.uf
     form.data_inicio.data = acordo.data_inicio
     form.data_fim.data    = acordo.data_fim
-    form.valor_cnpq.data  = locale.currency( acordo.valor_cnpq, symbol=False, grouping = True )
-    form.valor_epe.data   = locale.currency( acordo.valor_epe, symbol=False, grouping = True )
+    # dado legado (existe desde o commit inicial): campos monetários podem ser
+    # None no banco quando nunca foram preenchidos; locale.currency() quebra
+    # com TypeError para None, então tratamos como zero
+    form.valor_cnpq.data  = locale.currency( acordo.valor_cnpq or 0, symbol=False, grouping = True )
+    form.valor_epe.data   = locale.currency( acordo.valor_epe or 0, symbol=False, grouping = True )
     if acordo.unidade_cnpq.isdigit():
-        form.unid.data = None 
+        form.unid.data = None
     else:
-        form.unid.data = acordo.unidade_cnpq  
+        form.unid.data = acordo.unidade_cnpq
     form.situacao.data     = acordo.situ
-    form.capital.data  = locale.currency( acordo.capital, symbol=False, grouping = True )
-    form.custeio.data  = locale.currency( acordo.custeio, symbol=False, grouping = True )
-    form.bolsas.data   = locale.currency( acordo.bolsas, symbol=False, grouping = True )
+    form.capital.data  = locale.currency( acordo.capital or 0, symbol=False, grouping = True )
+    form.custeio.data  = locale.currency( acordo.custeio or 0, symbol=False, grouping = True )
+    form.bolsas.data   = locale.currency( acordo.bolsas or 0, symbol=False, grouping = True )
     form.siafi.data    = acordo.siafi
 
 
