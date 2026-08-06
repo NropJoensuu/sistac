@@ -57,7 +57,7 @@ class ProgPrefForm(FlaskForm):
 
     cod_programa = IntegerField('Código do Programa:', render_kw={'readonly': True})
     desc         = StringField('Descrição:', render_kw={'readonly': True})
-    sigla        = StringField('Sigla:',validators=[DataRequired(message="Informe a Sigla do Programa!")])
+    sigla        = StringField('Sigla do Convênio ou Programa no CNPq:',validators=[DataRequired(message="Informe a Sigla do Programa!")])
     coord        = StringField('Coordenação:',validators=[DataRequired(message="Informa a Coordenação!")])
     #coord        = SelectField('Coordenação:',choices= lista_coords, validators=[DataRequired(message="Escolha uma Coordenção!")])
     submit       = SubmitField('Registrar')

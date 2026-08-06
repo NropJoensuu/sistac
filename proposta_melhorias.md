@@ -70,19 +70,19 @@ final desta seção, uma sugestão minha de sequenciamento dentro disso.
 
 | # | Item |
 |---|---|
-| B1 | Renomear título "Lista dos Programas de Convênio (Transferegov)" → "Cadastrar Programa de Convênio no SISTAC" |
-| B2 | Tela de inserir/alterar Programa: campo "Sigla*" → "Sigla do Convênio ou Programa no CNPq" |
-| B3 | Renomear menu "Programas" → "Programas do Transferegov" (mesma tela do B1, título duplicado no pedido original — considerar como um único ajuste) |
-| B4 | Remover "Lista em execução" do menu |
-| B5 | Remover "Em execução por UF e Programa" do menu + comentar a execução (mesmo padrão já feito em Acordos) |
-| B6 | Remover "Histórico por Programa" do menu + comentar a execução (idem) |
-| B7 | Remover "Mapa" do menu + comentar a execução (idem) |
-| B8 | Criar item de menu "Gestão", com "Programas do Transferegov" como submenu |
-| B9 | Convênio → Programa CNPq: tabela existe, nada grava nela ainda (cobertura 0% no Painel Executivo). **Confirmar**: o sistema já busca os Programas CNPq via DW? Se sim, avaliar se dá pra popular esse vínculo a partir de lá também (mesma ideia do item A1) |
-| B10 | BI Convênios: filtro por coordenação + quadro por coordenação |
-| B11 | BI Convênios: filtro "órgão de origem" — siglas, não nome completo |
-| B12 | BI Convênios: filtro "Ano" — ano de início de vigência, ou tooltip |
-| B13 | Gestão → Lista de Convênios: filtros no mesmo padrão da Gestão de TED |
+| B1 | ✅ Título "Lista dos Programas de Convênio" → "Cadastrar Programa de Convênio no SISTAC" (`lista_programas_pref.html`) |
+| B2 | ✅ Tela de inserir/alterar Programa: label do campo "Sigla:" → "Sigla do Convênio ou Programa no CNPq:" (`ProgPrefForm.sigla`, `project/convenios/forms.py`) |
+| B3 | ✅ Rótulo do menu "Programas" → "Programas do Transferegov" (mesma tela do B1, tratado como ajuste único) |
+| B4 | ✅ Removido "Lista em execução" do menu (`base.html`) — a rota (`lista_convenios_SICONV` com `lista='em execução'`) continua ativa, só não tem mais link direto, pois é a mesma rota usada por "Lista todos" |
+| B5 | ✅ Removido "Em execução por UF e Programa" do menu; view `quadro_convenios` comentada em `project/convenios/views.py` (não apagada), mesmo padrão já usado em Acordos (`quadro_acordos`) |
+| B6 | ✅ Removido "Histórico por Programa" do menu; view `resumo_convenios` comentada (idem) |
+| B7 | ✅ Removido "Mapa" do menu; view `brasil_convenios` comentada (idem). `tests/test_convenios_dashboards.py` (as 3 rotas acima) removido — não havia mais rota ativa pra testar |
+| B8 | ✅ Item de menu "Gestão" criado no dropdown de Convênios (mesmo padrão de Acordos: `<h6 class="dropdown-header">`), com "Lista todos", "Programas do Transferegov" e "Mensagens SICONV" dentro; "BI Convênios" segue fora, após um divisor, controlado por `Sistema.bi_conv` |
+| B9 | Convênio → Programa CNPq: tabela existe, nada grava nela ainda (cobertura 0% no Painel Executivo). **Deixado de fora desta rodada de propósito** — precisa de um mecanismo de curadoria novo (maior que os demais itens B1-B13), fica pra outra rodada. **Confirmar**, quando entrar em pauta: o sistema já busca os Programas CNPq via DW? Se sim, avaliar se dá pra popular esse vínculo a partir de lá também (mesma ideia do item A1) |
+| B10 | ✅ BI Convênios: filtro por coordenação + quadro por coordenação. `bi_convenios()` ganhou `por_coord`/`opcoes_coord` (mesmo padrão de `por_orgao` em `bi_ted()`), usando `Programa_Interesse.coord` — dado estrutural nativo, sem curadoria manual, então (ao contrário de TED) não há convênio com mais de uma coordenação |
+| B11 | ✅ **Redefinido por Igor**: não é "órgão de origem" (esse conceito não existe em Convênio, diferente de TED) — é filtro por **Região**. Criado mapa UF→Região padrão IBGE (27 UFs, `_REGIAO_POR_UF` em `project/convenios/services.py`, função `regiao_da_uf()`), usado pra agregar `por_regiao`/`opcoes_regiao` (5 regiões) em `bi_convenios()`, a partir de `Proposta.UF_PROPONENTE` (já usada no filtro `uf` existente) |
+| B12 | ✅ **Decisão: Opção A (trocar a base do filtro)** — conferido com dado real: dos 361 convênios reais na base de dev (excluindo dados de teste), **100% têm `DIA_INIC_VIGENC_CONV` preenchido** (0% de nulos), bem mais completo que o equivalente em TED (~16% de nulos, item A9). `Convenio.ANO` também nem sempre bate com o ano de início de vigência (93% de concordância nos dados reais — parece ser o ano de registro/numeração do convênio, não de vigência). Com dado de vigência tão mais completo, o filtro/evolução "Ano" do BI passou a usar o ano extraído de `DIA_INIC_VIGENC_CONV` diretamente (`_ano_inicio_vigencia()`), no lugar de `Convenio.ANO` — ao contrário de TED, aqui não foi preciso manter tooltip como meio-termo |
+| B13 | ✅ Gestão → Lista de Convênios (`lista_convenios_SICONV`/`list_convenios.html`): paginação, ordenação por clique no cabeçalho e filtros adicionais (situação, UF, programa, busca) no mesmo padrão de `listar_teds()`/`gestao.html` (TED) — `_CHAVES_ORDENACAO_CONV`, `page`/`sort`/`dir` como querystring. Exportação CSV (`/static/convenios.csv`) já existia e continua respeitando o filtro ativo (regravado a cada carregamento da lista, com o conjunto completo filtrado, sem paginar — mesmo espírito de `exportar_teds_csv`). O filtro por coordenação (`ListaForm`, com os valores especiais `'usu'`/`'*'`/`'inst'`/sigla parcial já existentes em `_subquery_programa()`) foi mantido como estava, sem migrar pra querystring. **Achado lateral corrigido**: a rota não tinha `@login_required` mas usava `current_user.id` incondicionalmente — acesso anônimo derrubava a página com `AttributeError` em vez de redirecionar pro login; corrigido |
 | B14 | ✅ Gestão → Lista de Convênios → Convênio: seção "TEDs Vinculados" (modal) na tela de detalhes do Convênio (`convenio_detalhes.html`) — lista os TEDs já vinculados (com opção de desvincular) e um campo de busca (texto + `<datalist>` nativo do HTML5, sem lib nova) mostrando "TED nº — início do objeto" em vez do id cru, pra vincular um novo. Chama `ted.services.vincular_instrumento`/`desvincular_instrumento` diretamente (mesmo padrão já usado em `acordos/views.py` importando `core.services`) |
 
 ### C. Acordos

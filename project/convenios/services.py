@@ -153,14 +153,38 @@ def _subquery_programa(coord, unidade_coord):
     return programa, coord
 
 
-def listar_convenios_siconv(lista, coord, unidade_coord):
+# campo de filtro/exibição -> função que extrai a chave de ordenação de um item de
+# listar_convenios_siconv() — mesmo padrão de _CHAVES_ORDENACAO em project/ted/services.py
+# (item B13 do backlog)
+_CHAVES_ORDENACAO_CONV = {
+    'convenio': lambda row: row.NR_CONVENIO or '',
+    'ano': lambda row: row.ANO_DISPONIBILIZACAO or '',
+    'coord': lambda row: row.coord or '',
+    'uf': lambda row: row.UF_PROPONENTE or '',
+    'programa': lambda row: row.sigla or '',
+    'situacao': lambda row: row.SIT_CONVENIO or '',
+    'vigencia_fim': lambda row: row.DIA_FIM_VIGENC_CONV or dt.date.min,
+    'repasse': lambda row: row.VL_REPASSE_CONV or 0,
+}
+
+
+def listar_convenios_siconv(lista, coord, unidade_coord, filtros=None, page=None, per_page=25, sort=None, direcao='asc'):
     """
     Retorna a lista de convênios filtrada por coordenação e critério de
     lista ('todos', 'em execução', ou 'programaAAAA...SIGLA'), a data
     da última carga SICONV, e o valor normalizado de coordenação (para
     popular o form de filtro). Também grava um CSV de referência em
-    project/static.
+    project/static — sempre com o conjunto completo filtrado (sem
+    paginar), mesmo espírito de exportar_teds_csv em project/ted/services.py.
+
+    Item B13 do backlog: filtros adicionais (`filtros['situacao'/'uf'/
+    'programa'/'busca']`), ordenação por clique no cabeçalho (`sort`, um
+    dos campos de _CHAVES_ORDENACAO_CONV, e `direcao` 'asc'/'desc') e
+    paginação (`page`) — mesma estrutura de listar_teds() em
+    project/ted/services.py. Sem `page` (comportamento antigo), retorna a
+    lista completa sem paginar.
     """
+    filtros = filtros or {}
     programa, coord_normalizado = _subquery_programa(coord, unidade_coord)
 
     campos_convenio = (
@@ -178,22 +202,39 @@ def listar_convenios_siconv(lista, coord, unidade_coord):
                       .outerjoin(DadosSEI, Convenio.NR_CONVENIO == DadosSEI.nr_convenio)
 
     if lista == 'todos':
-        convenio = query.filter(Convenio.DIA_PUBL_CONV != '')\
-                        .order_by(programa.c.sigla.desc(), Convenio.SIT_CONVENIO.desc()).all()
+        query = query.filter(Convenio.DIA_PUBL_CONV != '')
+        ordem_padrao = (programa.c.sigla.desc(), Convenio.SIT_CONVENIO.desc())
 
     elif lista == 'em execução':
-        convenio = query.filter(Convenio.SIT_CONVENIO == 'Em execução')\
-                        .order_by(Convenio.SUBSITUACAO_CONV.desc(), Convenio.DIA_FIM_VIGENC_CONV,
-                                  programa.c.sigla.desc()).all()
+        query = query.filter(Convenio.SIT_CONVENIO == 'Em execução')
+        ordem_padrao = (Convenio.SUBSITUACAO_CONV.desc(), Convenio.DIA_FIM_VIGENC_CONV, programa.c.sigla.desc())
 
     elif lista[:8] == 'programa':
-        convenio = query.filter(Convenio.DIA_PUBL_CONV != '',
-                                programa.c.sigla == lista[21:],
-                                programa.c.ANO_DISPONIBILIZACAO == lista[13:17])\
-                        .order_by(Convenio.SIT_CONVENIO, Convenio.DIA_FIM_VIGENC_CONV,
-                                  programa.c.sigla.desc()).all()
+        query = query.filter(Convenio.DIA_PUBL_CONV != '',
+                             programa.c.sigla == lista[21:],
+                             programa.c.ANO_DISPONIBILIZACAO == lista[13:17])
+        ordem_padrao = (Convenio.SIT_CONVENIO, Convenio.DIA_FIM_VIGENC_CONV, programa.c.sigla.desc())
     else:
+        query = None
+        ordem_padrao = ()
+
+    if query is None:
         convenio = []
+    else:
+        if filtros.get('situacao'):
+            query = query.filter(Convenio.SIT_CONVENIO == filtros['situacao'])
+        if filtros.get('uf'):
+            query = query.filter(programa.c.UF_PROPONENTE == filtros['uf'])
+        if filtros.get('programa'):
+            query = query.filter(programa.c.sigla == filtros['programa'])
+        if filtros.get('busca'):
+            termo = f"%{filtros['busca']}%"
+            query = query.filter(or_(Convenio.NR_CONVENIO.ilike(termo), DadosSEI.sei.ilike(termo)))
+
+        convenio = query.order_by(*ordem_padrao).all()
+
+    if sort in _CHAVES_ORDENACAO_CONV:
+        convenio = sorted(convenio, key=_CHAVES_ORDENACAO_CONV[sort], reverse=(direcao == 'desc'))
 
     data_carga = db.session.query(RefSICONV.data_ref).first()
 
@@ -205,7 +246,34 @@ def listar_convenios_siconv(lista, coord, unidade_coord):
         convenio,
     )
 
-    return convenio, coord_normalizado, str(data_carga[0])
+    if page is None:
+        return convenio, coord_normalizado, str(data_carga[0])
+
+    total = len(convenio)
+    pages = max(1, math.ceil(total / per_page))
+    page = max(1, min(page, pages))
+    inicio = (page - 1) * per_page
+
+    paginacao = {
+        'page': page, 'per_page': per_page, 'total': total, 'pages': pages,
+        'has_prev': page > 1, 'has_next': page < pages,
+        'prev_num': page - 1, 'next_num': page + 1,
+    }
+    return convenio[inicio:inicio + per_page], paginacao, coord_normalizado, str(data_carga[0])
+
+
+def opcoes_filtro_convenios():
+    """Opções (globais, sem depender do filtro de coordenação atual) para os selects de filtro da Gestão de Convênios (item B13)."""
+    situacoes = [s[0] for s in db.session.query(Convenio.SIT_CONVENIO)
+                 .filter(Convenio.SIT_CONVENIO.isnot(None), Convenio.SIT_CONVENIO != '')
+                 .distinct().order_by(Convenio.SIT_CONVENIO).all()]
+    ufs = [u[0] for u in db.session.query(Proposta.UF_PROPONENTE)
+           .filter(Proposta.UF_PROPONENTE.isnot(None))
+           .distinct().order_by(Proposta.UF_PROPONENTE).all()]
+    programas = [p[0] for p in db.session.query(Programa_Interesse.sigla)
+                 .filter(Programa_Interesse.sigla.isnot(None))
+                 .distinct().order_by(Programa_Interesse.sigla).all()]
+    return {'situacoes': situacoes, 'ufs': ufs, 'programas': programas}
 
 
 # =============================================================================
@@ -1152,17 +1220,58 @@ def resumo_convenios(unidade):
 #
 ## BI de convênios (Etapa 1 do roadmap_bi_sistac.md)
 
+# Mapa UF -> Região (padrão IBGE, 27 UFs incluindo DF) — item B11 do backlog.
+# Não existe esse mapeamento em nenhum outro lugar do projeto ainda.
+_REGIAO_POR_UF = {
+    'AC': 'Norte', 'AP': 'Norte', 'AM': 'Norte', 'PA': 'Norte', 'RO': 'Norte', 'RR': 'Norte', 'TO': 'Norte',
+    'AL': 'Nordeste', 'BA': 'Nordeste', 'CE': 'Nordeste', 'MA': 'Nordeste', 'PB': 'Nordeste',
+    'PE': 'Nordeste', 'PI': 'Nordeste', 'RN': 'Nordeste', 'SE': 'Nordeste',
+    'DF': 'Centro-Oeste', 'GO': 'Centro-Oeste', 'MT': 'Centro-Oeste', 'MS': 'Centro-Oeste',
+    'ES': 'Sudeste', 'MG': 'Sudeste', 'RJ': 'Sudeste', 'SP': 'Sudeste',
+    'PR': 'Sul', 'RS': 'Sul', 'SC': 'Sul',
+}
+REGIOES = ['Norte', 'Nordeste', 'Centro-Oeste', 'Sudeste', 'Sul']
+
+
+def regiao_da_uf(uf):
+    """Região (padrão IBGE) de uma UF. None se a UF não for reconhecida (vazia ou inválida)."""
+    return _REGIAO_POR_UF.get(uf)
+
+
+def _ano_inicio_vigencia(convenio):
+    """
+    Ano de início de vigência (extraído de DIA_INIC_VIGENC_CONV, string
+    'DD/MM/YYYY' — não é db.Date como DIA_FIM_VIGENC_CONV). Usado no
+    filtro/evolução "Ano" do BI de Convênios (item B12 do backlog) no
+    lugar de Convenio.ANO.
+
+    Decisão (mesmo cuidado do item A9 em TED): conferido com dado real —
+    dos 361 convênios reais na base de dev (excluindo dados de teste),
+    100% têm DIA_INIC_VIGENC_CONV preenchido (0% de nulos), bem mais
+    completo que o equivalente em TED (~16% de nulos). Ano de início de
+    vigência também não bate sempre com Convenio.ANO (93% de concordância
+    nos dados reais — os dois campos não são a mesma coisa; ANO parece
+    referir-se ao ano de registro/numeração do convênio, não de vigência).
+    Com os dados de vigência tão mais completos, a Opção A (trocar a base
+    do filtro) é segura aqui, ao contrário de TED, onde a Opção B (manter
+    + tooltip) foi a escolhida.
+    """
+    partes = (convenio.DIA_INIC_VIGENC_CONV or '').split('/')
+    return partes[2] if len(partes) == 3 and partes[2] else 'Não informado'
+
+
 def bi_convenios(filtros=None):
     """
     Monta os indicadores da tela de BI de Convênios: valor em carteira
     por situação, taxa de desembolso, quantidade por situação,
-    distribuição por programa, evolução temporal por ano, vigência a
-    vencer em 3/6/12 meses e ranking de parceiros/FAPs por volume.
+    distribuição por programa/coordenação/região, evolução temporal por
+    ano (de início de vigência — item B12), vigência a vencer em
+    3/6/12 meses e ranking de parceiros/FAPs por volume.
 
-    Visão global (sem filtro de coordenação), ao contrário de
-    quadro_convenios/resumo_convenios — decisão de produto: esta tela é
-    a "visão consolidada para a gestão" que o roadmap pede, não uma
-    visão operacional por coordenação.
+    Visão global (sem filtro de coordenação por padrão — mas filtrável),
+    ao contrário de quadro_convenios/resumo_convenios — decisão de
+    produto: esta tela é a "visão consolidada para a gestão" que o
+    roadmap pede, não uma visão operacional por coordenação.
 
     "Distribuição por Programa CNPq" e "Programa Estratégico" ficam de
     fora de propósito: não existe vínculo Convenio -> Programa_CNPq no
@@ -1172,7 +1281,7 @@ def bi_convenios(filtros=None):
     """
     filtros = filtros or {}
 
-    base = db.session.query(Convenio, Proposta, Programa_Interesse.sigla)\
+    base = db.session.query(Convenio, Proposta, Programa_Interesse.sigla, Programa_Interesse.coord)\
                      .join(Proposta, Proposta.ID_PROPOSTA == Convenio.ID_PROPOSTA)\
                      .join(Programa, Programa.ID_PROGRAMA == Proposta.ID_PROGRAMA)\
                      .outerjoin(Programa_Interesse, Programa_Interesse.cod_programa == Programa.COD_PROGRAMA)
@@ -1181,18 +1290,23 @@ def bi_convenios(filtros=None):
         base = base.filter(Programa_Interesse.sigla == filtros['programa'])
     if filtros.get('uf'):
         base = base.filter(Proposta.UF_PROPONENTE == filtros['uf'])
+    if filtros.get('regiao'):
+        ufs_da_regiao = [uf for uf, regiao in _REGIAO_POR_UF.items() if regiao == filtros['regiao']]
+        base = base.filter(Proposta.UF_PROPONENTE.in_(ufs_da_regiao))
+    if filtros.get('coord'):
+        base = base.filter(Programa_Interesse.coord == filtros['coord'])
     if filtros.get('parceiro'):
         base = base.filter(Proposta.NM_PROPONENTE.ilike('%' + filtros['parceiro'] + '%'))
     if filtros.get('situacao'):
         base = base.filter(Convenio.SIT_CONVENIO == filtros['situacao'])
     if filtros.get('ano'):
-        base = base.filter(Convenio.ANO == filtros['ano'])
+        base = base.filter(func.split_part(Convenio.DIA_INIC_VIGENC_CONV, '/', 3) == filtros['ano'])
 
     convenios = base.all()
 
     # valor em carteira e quantidade, por situação
     por_situacao = {}
-    for conv, prop, sigla in convenios:
+    for conv, prop, sigla, coord in convenios:
         sit = conv.SIT_CONVENIO or 'Não informado'
         item = por_situacao.setdefault(sit, {'qtd': 0, 'valor': 0.0, 'repasse': 0.0, 'desembolsado': 0.0})
         item['qtd'] += 1
@@ -1200,8 +1314,8 @@ def bi_convenios(filtros=None):
         item['repasse'] += none_0(conv.VL_REPASSE_CONV)
         item['desembolsado'] += none_0(conv.VL_DESEMBOLSADO_CONV)
 
-    total_repasse = sum(none_0(c.VL_REPASSE_CONV) for c, p, s in convenios)
-    total_desembolsado = sum(none_0(c.VL_DESEMBOLSADO_CONV) for c, p, s in convenios)
+    total_repasse = sum(none_0(c.VL_REPASSE_CONV) for c, p, s, co in convenios)
+    total_desembolsado = sum(none_0(c.VL_DESEMBOLSADO_CONV) for c, p, s, co in convenios)
     taxa_desembolso_geral = round(100 * total_desembolsado / total_repasse) if total_repasse else 0
 
     situacoes = []
@@ -1219,7 +1333,7 @@ def bi_convenios(filtros=None):
 
     # distribuição por programa (orçamentário, via Programa_Interesse)
     por_programa = {}
-    for conv, prop, sigla in convenios:
+    for conv, prop, sigla, coord in convenios:
         nome = sigla or 'Sem programa de interesse cadastrado'
         item = por_programa.setdefault(nome, {'qtd': 0, 'valor': 0.0})
         item['qtd'] += 1
@@ -1230,10 +1344,43 @@ def bi_convenios(filtros=None):
         key=lambda x: x['valor'], reverse=True,
     )
 
-    # evolução temporal, por ano
+    # quantidade/valor por coordenação do CNPq (item B10) — dado estrutural
+    # nativo (Programa_Interesse.coord, mesmo campo já usado em
+    # _subquery_programa()), sem curadoria manual — ao contrário do
+    # equivalente em TED (item A7), não há possibilidade de mais de uma
+    # coordenação por convênio, então a soma de qtd por coordenação nunca
+    # passa do total.
+    por_coord = {}
+    for conv, prop, sigla, coord in convenios:
+        nome_coord = coord or 'Sem coordenação cadastrada'
+        item = por_coord.setdefault(nome_coord, {'qtd': 0, 'valor': 0.0})
+        item['qtd'] += 1
+        item['valor'] += none_0(conv.VL_REPASSE_CONV) + none_0(conv.VL_CONTRAPARTIDA_CONV)
+
+    coordenacoes = sorted(
+        [{'coordenacao': nome, 'qtd': item['qtd'], 'valor': item['valor']} for nome, item in por_coord.items()],
+        key=lambda x: x['qtd'], reverse=True,
+    )
+
+    # quantidade/valor por região (padrão IBGE — item B11), a partir da UF
+    # do proponente (Proposta.UF_PROPONENTE, já usada no filtro 'uf')
+    por_regiao = {}
+    for conv, prop, sigla, coord in convenios:
+        nome_regiao = regiao_da_uf(prop.UF_PROPONENTE) or 'Não informado'
+        item = por_regiao.setdefault(nome_regiao, {'qtd': 0, 'valor': 0.0})
+        item['qtd'] += 1
+        item['valor'] += none_0(conv.VL_REPASSE_CONV) + none_0(conv.VL_CONTRAPARTIDA_CONV)
+
+    regioes = sorted(
+        [{'regiao': nome, 'qtd': item['qtd'], 'valor': item['valor']} for nome, item in por_regiao.items()],
+        key=lambda x: x['qtd'], reverse=True,
+    )
+
+    # evolução temporal, por ano de início de vigência (item B12 — ver
+    # docstring de _ano_inicio_vigencia)
     por_ano = {}
-    for conv, prop, sigla in convenios:
-        ano = conv.ANO or 'Não informado'
+    for conv, prop, sigla, coord in convenios:
+        ano = _ano_inicio_vigencia(conv)
         item = por_ano.setdefault(ano, {'qtd': 0, 'valor': 0.0})
         item['qtd'] += 1
         item['valor'] += none_0(conv.VL_REPASSE_CONV) + none_0(conv.VL_CONTRAPARTIDA_CONV)
@@ -1251,7 +1398,7 @@ def bi_convenios(filtros=None):
         '12_meses': hoje + dt.timedelta(days=365),
     }
     vigencia_a_vencer = {chave: 0 for chave in janelas}
-    for conv, prop, sigla in convenios:
+    for conv, prop, sigla, coord in convenios:
         fim = conv.DIA_FIM_VIGENC_CONV
         if fim and fim >= hoje:
             for chave, limite in janelas.items():
@@ -1260,7 +1407,7 @@ def bi_convenios(filtros=None):
 
     # ranking de parceiros/FAPs por volume de recursos (top 15)
     por_parceiro = {}
-    for conv, prop, sigla in convenios:
+    for conv, prop, sigla, coord in convenios:
         nome = prop.NM_PROPONENTE or 'Não informado'
         por_parceiro[nome] = por_parceiro.get(nome, 0.0) + none_0(conv.VL_REPASSE_CONV)
 
@@ -1280,15 +1427,23 @@ def bi_convenios(filtros=None):
     opcoes_situacao = [p.SIT_CONVENIO for p in db.session.query(Convenio.SIT_CONVENIO)
                        .filter(Convenio.SIT_CONVENIO.isnot(None))
                        .distinct().order_by(Convenio.SIT_CONVENIO).all()]
-    opcoes_ano = [p.ANO for p in db.session.query(Convenio.ANO)
-                  .filter(Convenio.ANO.isnot(None))
-                  .distinct().order_by(Convenio.ANO.desc()).all()]
+    opcoes_coord = [p.coord for p in db.session.query(Programa_Interesse.coord)
+                    .filter(Programa_Interesse.coord.isnot(None))
+                    .distinct().order_by(Programa_Interesse.coord).all()]
+    opcoes_ano = sorted(
+        {a[0] for a in db.session.query(func.split_part(Convenio.DIA_INIC_VIGENC_CONV, '/', 3))
+         .filter(Convenio.DIA_INIC_VIGENC_CONV.isnot(None), Convenio.DIA_INIC_VIGENC_CONV != '').all()
+         if a[0]},
+        reverse=True,
+    )
 
     return {
         'valor_total_carteira': locale.currency(valor_total_carteira, symbol=False, grouping=True),
         'taxa_desembolso_geral': taxa_desembolso_geral,
         'situacoes': situacoes,
         'programas': programas,
+        'coordenacoes': coordenacoes,
+        'regioes': regioes,
         'evolucao': evolucao,
         'vigencia_a_vencer': vigencia_a_vencer,
         'ranking_parceiros': ranking_parceiros,
@@ -1297,5 +1452,7 @@ def bi_convenios(filtros=None):
         'opcoes_programa': opcoes_programa,
         'opcoes_uf': opcoes_uf,
         'opcoes_situacao': opcoes_situacao,
+        'opcoes_coord': opcoes_coord,
+        'opcoes_regiao': REGIOES,
         'opcoes_ano': opcoes_ano,
     }

@@ -84,15 +84,13 @@
             </a>
             <div class="dropdown-menu" aria-labelledby="navbarDropdown1">
               {% if current_user.is_authenticated and current_user.trab_conv == 1 %}
-                <a class="dropdown-item" href="{{url_for('convenios.lista_programas_pref')}}">Programas</a>
+                <h6 class="dropdown-header">Gestão</h6>
                 <a class="dropdown-item" href="{{url_for('convenios.lista_convenios_SICONV',lista='todos',coord='usu')}}">Lista todos</a>
-                <a class="dropdown-item" href="{{url_for('convenios.lista_convenios_SICONV',lista='em execução',coord='usu')}}">Lista em execução</a>
-                <a class="dropdown-item" href="{{url_for('convenios.quadro_convenios')}}">Em execução por UF e Programa</a>
-                <a class="dropdown-item" href="{{url_for('convenios.resumo_convenios')}}">Histórico por Programa</a>
-                <a class="dropdown-item" href="{{url_for('convenios.brasil_convenios')}}">Mapa</a>
+                <a class="dropdown-item" href="{{url_for('convenios.lista_programas_pref')}}">Programas do Transferegov</a>
                 <a class="dropdown-item" href="{{url_for('convenios.msg_siconv')}}">Mensagens SICONV</a>
               {% endif %}
               {% if sistema_bi and sistema_bi.bi_conv == 1 %}
+                {% if current_user.is_authenticated and current_user.trab_conv == 1 %}<div class="dropdown-divider"></div>{% endif %}
                 <a class="dropdown-item" href="{{url_for('convenios.bi_convenios')}}">BI Convênios</a>
               {% endif %}
             </div>

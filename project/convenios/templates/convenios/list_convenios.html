@@ -1,206 +1,181 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="container-fluid">
 
-<div class="jumbotron">
+  {% macro link_ordenacao(campo, texto) %}
+    {% set nova_dir = 'desc' if (sort == campo and direcao == 'asc') else 'asc' %}
+    {% set args = request.args.to_dict() %}
+    {% set _ = args.update({'sort': campo, 'dir': nova_dir, 'page': 1}) %}
+    <a href="{{ url_for('convenios.lista_convenios_SICONV', lista=lista, coord=coord, **args) }}" class="text-dark">{{ texto }}{% if sort == campo %} {{ '▲' if direcao == 'asc' else '▼' }}{% endif %}</a>
+  {% endmacro %}
 
+  <div class="card border-primary mb-3">
+    <div class="card-header">
+      <h3>Gestão de Convênios</h3>
+      <small class="text-muted">
+        Convênios cadastrados no SICONV
+        {% if lista == 'todos' %}<span class="text-info font-weight-bold">(todos)</span>{% endif %}
+        {% if lista == 'em execução' %}<span class="text-info font-weight-bold">(em execução)</span>{% endif %}
+        {% if lista[:8] == 'programa' %}<span class="text-info font-weight-bold">({{ lista[8:] }})</span>{% endif %}
+      </small>
+    </div>
 
+    <div class="card-body">
 
-      <div class="row">
-
-        <div class="col">
-          <h5>Lista de Convênios</h5>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="text-muted" style="font-size:0.9rem">
+          {{ paginacao.total }} convênio(s) na listagem — pág. {{ paginacao.page }} de {{ paginacao.pages }}
         </div>
-
-        <div class="col">
-          <form class="form-group" method='POST'>
-            {{ form.hidden_tag() }}
-              <div class="row">
-                <div class="col-3">
-                  {{ form.coord(class="form-control form-control-sm") }}
-                </div>
-                <div class="col">
-                  {{ form.submit(class="btn btn-outline-primary btn-sm") }}
-                </div>
-              </div>
-          </form>
+        <div class="text-muted" style="font-size:0.9rem">
+          Dados de: <strong>{{ data_carga[8:]+'/'+data_carga[5:7]+'/'+data_carga[0:4] }}</strong>
+          <a href="/static/convenios.csv" class="btn btn-outline-primary btn-sm ml-2">Download do CSV</a>
         </div>
-
       </div>
 
+      <form class="form-inline mb-2" method="POST">
+        {{ form.hidden_tag() }}
+        <label class="mr-1">Coordenação:</label>
+        {{ form.coord(class="form-control form-control-sm mr-2") }}
+        {{ form.submit(class="btn btn-outline-primary btn-sm") }}
+      </form>
 
-<caption>
-  <div class="row">
-      <div class="col-8">
-        <p>Lista dos <span class="badge badge-pill badge-primary">{{quantidade}}</span> convênios cadastrados no SICONV
-          {% if lista == 'todos' %}
-            <span class="text-info font-weight-bold">(todos)</span>
-          {% endif %}
-          {% if lista == 'em execução' %}
-            <span class="text-info font-weight-bold">(em execução)</span>
-          {% endif %}
-          {% if lista[:8] == 'programa' %}
-            <span class="text-info font-weight-bold">({{lista[8:]}})</span>
-          {% endif %}
-        </p>
+      <form method="get" class="form-inline mb-4" action="{{ url_for('convenios.lista_convenios_SICONV', lista=lista, coord=coord) }}">
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">Situação:</label>
+          <select class="form-control" name="situacao">
+            <option value="">Todas</option>
+            {% for s in situacoes %}
+              <option value="{{ s }}" {% if filtros.situacao == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">UF:</label>
+          <select class="form-control" name="uf">
+            <option value="">Todas</option>
+            {% for uf in ufs %}
+              <option value="{{ uf }}" {% if filtros.uf == uf %}selected{% endif %}>{{ uf }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">Programa:</label>
+          <select class="form-control" name="programa">
+            <option value="">Todos</option>
+            {% for p in programas %}
+              <option value="{{ p }}" {% if filtros.programa == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group mr-2 mb-2">
+          <label class="mr-1">Buscar:</label>
+          <input class="form-control" type="text" name="busca" value="{{ filtros.busca or '' }}" placeholder="Número do convênio, SEI…">
+        </div>
+        <button type="submit" class="btn btn-primary mb-2">Filtrar</button>
+        <a href="{{ url_for('convenios.lista_convenios_SICONV', lista=lista, coord=coord) }}" class="btn btn-outline-secondary mb-2 ml-2">Limpar</a>
+      </form>
+
+      <div class="table-responsive">
+        <table class="table table-striped table-sm">
+          <thead>
+            <tr>
+              <th>{{ link_ordenacao('convenio', 'Convênio') }}</th>
+              <th>{{ link_ordenacao('ano', 'Ano') }}</th>
+              <th>{{ link_ordenacao('coord', 'Coord.') }}</th>
+              <th>SEI</th>
+              <th>EP</th>
+              <th>{{ link_ordenacao('uf', 'UF') }}</th>
+              <th>{{ link_ordenacao('programa', 'Programa') }}</th>
+              <th>{{ link_ordenacao('situacao', 'Situação') }}</th>
+              <th>Subsituação</th>
+              <th><abbr title="Vermelho: vence em menos de 30 dias. Laranja: vence em menos de 60 dias. Cinza: vence em menos de 90 dias.">{{ link_ordenacao('vigencia_fim', 'Fim de vigência') }}</abbr></th>
+              <th class="text-right">{{ link_ordenacao('repasse', 'Repasse') }}</th>
+              <th class="text-right">Desemb. (% exec.)</th>
+              <th class="text-right">Contrap.</th>
+              <th class="text-right">Ingr. Contrap. (% exec.)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for conv in convenio %}
+              <tr>
+                <td>
+                  <a href="{{ url_for('convenios.convenio_detalhes', conv=conv.NR_CONVENIO) }}" title="Clique aqui para ver detalhes do convênio">{{ conv.NR_CONVENIO }}</a>
+                </td>
+                <td>{{ conv.ANO_DISPONIBILIZACAO if conv.ANO_DISPONIBILIZACAO is not none else 'N.I.' }}</td>
+                <td>{{ conv.coord if conv.coord is not none else 'N.I.' }}</td>
+                <td>
+                  {% if conv.sei is not none %}
+                    <a href="{{ url_for('convenios.SEI_demandas', conv=conv.NR_CONVENIO) }}" title="Clique aqui para ver as demandas deste processo">{{ conv.sei }}</a>
+                  {% else %}
+                    N.I.
+                  {% endif %}
+                </td>
+                <td>{{ conv.epe if conv.epe is not none else 'N.I.' }}</td>
+                <td>{{ conv.UF_PROPONENTE }}</td>
+                <td>{{ conv.sigla }}</td>
+                <td>{{ conv.SIT_CONVENIO }}</td>
+                <td>{{ conv.SUBSITUACAO_CONV }}</td>
+                {% if conv.prazo is not none and conv.prazo <= 30 and conv.prazo >= 0 %}
+                  <td class="bg-danger text-white font-weight-bold">{{ conv.DIA_FIM_VIGENC_CONV.strftime('%d/%m/%Y') }}</td>
+                {% elif conv.prazo is not none and conv.prazo <= 60 and conv.prazo > 30 %}
+                  <td class="bg-warning text-dark font-weight-bold">{{ conv.DIA_FIM_VIGENC_CONV.strftime('%d/%m/%Y') }}</td>
+                {% elif conv.prazo is not none and conv.prazo <= 90 and conv.prazo > 60 %}
+                  <td class="bg-secondary text-white font-weight-bold">{{ conv.DIA_FIM_VIGENC_CONV.strftime('%d/%m/%Y') }}</td>
+                {% else %}
+                  <td>{{ conv.DIA_FIM_VIGENC_CONV.strftime('%d/%m/%Y') if conv.DIA_FIM_VIGENC_CONV is not none else 'N.I.' }}</td>
+                {% endif %}
+                <td class="text-right">{{ conv.VL_REPASSE_CONV|converte_para_real if conv.VL_REPASSE_CONV is not none else '0,00' }}</td>
+                <td class="text-right">
+                  {{ conv.VL_DESEMBOLSADO_CONV|converte_para_real if conv.VL_DESEMBOLSADO_CONV is not none else '0,00' }}
+                  {% if not conv.VL_REPASSE_CONV %}
+                    (<span class="text-danger">0 %</span>)
+                  {% else %}
+                    {% set pct_desemb = (100*(conv.VL_DESEMBOLSADO_CONV or 0)/conv.VL_REPASSE_CONV)|round|int %}
+                    (<span class="{{ 'text-success' if pct_desemb == 100 else 'text-danger' }}">{{ pct_desemb }} %</span>)
+                  {% endif %}
+                </td>
+                <td class="text-right">{{ conv.VL_CONTRAPARTIDA_CONV|converte_para_real if conv.VL_CONTRAPARTIDA_CONV is not none else '0,00' }}</td>
+                <td class="text-right">
+                  {{ conv.VL_INGRESSO_CONTRAPARTIDA|converte_para_real if conv.VL_INGRESSO_CONTRAPARTIDA is not none else '0,00' }}
+                  {% if not conv.VL_CONTRAPARTIDA_CONV %}
+                    (<span class="text-danger">0 %</span>)
+                  {% else %}
+                    {% set pct_ingr = (100*(conv.VL_INGRESSO_CONTRAPARTIDA or 0)/conv.VL_CONTRAPARTIDA_CONV)|round|int %}
+                    (<span class="{{ 'text-success' if pct_ingr == 100 else 'text-danger' }}">{{ pct_ingr }} %</span>)
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="13" class="text-center text-muted py-4">Nenhum convênio encontrado com os filtros atuais.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-      <div class="col">
-        <p align="right"><span class="text-secondary">Dados de </span>
-          <span class="badge badge-pill badge-info">{{data_carga[8:]+'/'+data_carga[5:7]+'/'+data_carga[0:4]}}</span></p>
-      </div>
-      <div class = "col">
-        <p align="right"><a href=/static/convenios.csv class="btn btn-outline-primary" role="button" aria-pressed="true">Download do csv</a></p>
-      </div>
+
+      {% if paginacao.pages > 1 %}
+        <ul class="pagination justify-content-center">
+          {% set args_base = request.args.to_dict() %}
+
+          <li class="page-item {% if not paginacao.has_prev %}disabled{% endif %}">
+            {% set args = dict(args_base) %}{% set _ = args.update({'page': paginacao.prev_num}) %}
+            <a class="page-link" href="{{ url_for('convenios.lista_convenios_SICONV', lista=lista, coord=coord, **args) }}">Anterior</a>
+          </li>
+
+          {% for num in range(1, paginacao.pages + 1) %}
+            {% set args = dict(args_base) %}{% set _ = args.update({'page': num}) %}
+            <li class="page-item {% if num == paginacao.page %}active{% endif %}">
+              <a class="page-link" href="{{ url_for('convenios.lista_convenios_SICONV', lista=lista, coord=coord, **args) }}">{{ num }}</a>
+            </li>
+          {% endfor %}
+
+          <li class="page-item {% if not paginacao.has_next %}disabled{% endif %}">
+            {% set args = dict(args_base) %}{% set _ = args.update({'page': paginacao.next_num}) %}
+            <a class="page-link" href="{{ url_for('convenios.lista_convenios_SICONV', lista=lista, coord=coord, **args) }}">Próxima</a>
+          </li>
+        </ul>
+      {% endif %}
+
+    </div>
   </div>
-</caption>
-
-<div style="overflow-y:scroll ; height:500px">
-
-  <table id="table"
-        data-toggle="table"
-        data-filter-control="true"
-        data-show-search-clear-button="true"
-        data-sortable="true"
-        classes="table-sm"
-        data-show-columns="true"
-        data-show-columns-toggle-all="true"
-        class="table table-striped table-hover table-sm">
-    {% if lista == 'todos' %}
-      <caption>Convênios (todos)</caption>
-    {% endif %}
-    {% if lista == 'vencendo' %}
-      <caption>Convênios (com vencimento em menos de 90 dias)</caption>
-    {% endif %}
-    {% if lista == 'em execução' %}
-      <caption>Convênios (em execução)</caption>
-    {% endif %}
-    <thead>
-      <tr>
-        <th scope="col"><p align = "center">#</p></th>
-        <th scope="col" data-sortable="true"><p align = "center">Convênio</p></th>
-        <th scope="col" data-field="Ano" data-filter-control="input" data-sortable="true"><p align = "center">Ano</p></th>
-        <th scope="col" data-field="coord" data-filter-control="input" data-sortable="true"><p align = "center">Coord.</p></th>
-        <th scope="col" data-sortable="true"><p align = "center"><abbr title="Clique no NUP para ver as demandas do processo.">SEI</abbr></p></th>
-        <th scope="col" data-field="EP" data-filter-control="input" data-sortable="true"><p align = "center">EP</p></th>
-        <th scope="col" data-field="UF" data-filter-control="input" data-sortable="true"><p align = "center">UF</p></th>
-        <th scope="col" data-field="Programa" data-filter-control="input" data-sortable="true"><p align = "center">Programa</p></th>
-        <th scope="col" data-field="Situação" data-filter-control="input" data-sortable="true"><p align = "center">Situação</p></th>
-        <th scope="col"><p align = "center">Subsituação</p></th>
-        <th scope="col" data-sortable="true"><p align = "center"><abbr title="Vermelho: vence em menos de 30 dias. Laranja: vence em menos de 60 dias. Cinza: vence em menos de 90 dias.">Final de Vigência</p></th>
-        <th scope="col" data-sortable="true"><p align = "center">Repasse</p></th>
-        <th scope="col" data-sortable="true"><p align = "center">Desemb. (% exec.)</p></th>
-        <th scope="col" data-sortable="true"><p align = "center">Contrap.</p></th>
-        <th scope="col" data-sortable="true"><p align = "center">Ingr. Contrap. (% exec.)</p></th>
-      </tr>
-    </thead>
-
-    <tbody>
-
-      {% for conv in convenio %}
-
-      <tr>
-        <th scope="row"><p align = "center"> {{convenio.index(conv) + 1}}</p></th>
-
-        <td><p align = "center"> <a href="{{url_for('convenios.convenio_detalhes', conv=conv.NR_CONVENIO)}}"> <abbr title="Clique aqui para ver detalhes do convênio">{{conv.NR_CONVENIO}} </abbr></a> </p></td>
-        {% if conv.ANO_DISPONIBILIZACAO != None %}
-          <td><p align = "center"> {{conv.ANO_DISPONIBILIZACAO}} </p></td>
-        {% else %}
-          <td><p align = "center"> N.I. </p></td>
-        {% endif %}
-        {% if conv.coord != None %}
-        <td><p align = "center"> {{conv.coord}} </p></td>
-        {% else %}
-          <td><p align = "center"> N.I. </p></td>
-        {% endif %}
-        {% if conv.sei != None %}
-          <td><p align = "center"> <a href="{{url_for('convenios.SEI_demandas', conv=conv.NR_CONVENIO)}}"><abbr title="Clique aqui para ver as demandas deste processo">{{conv.sei}}</abbr></a> </p></td>
-        {% else %}
-          <td><p align = "center"> N.I. </p></td>
-        {% endif %}
-        {% if conv.epe != None %}
-        <td><p align = "center"> {{conv.epe}} </p></td>
-        {% else %}
-          <td><p align = "center"> N.I. </p></td>
-        {% endif %}
-        <td><p align = "center"> {{conv.UF_PROPONENTE}} </p></td>
-        <td><p align = "center"> {{conv.sigla}} </p></td>
-        <td><p align = "center"> {{conv.SIT_CONVENIO}} </p></td>
-        <td><p align = "center"> {{conv.SUBSITUACAO_CONV}} </p></td>
-        {% if conv.prazo <= 30 and conv.prazo >= 0 %}
-          <td><p align = "center" class="bg-danger text-white font-weight-bold"> {{conv.DIA_FIM_VIGENC_CONV.strftime('%d/%m/%Y')}} </p></td>
-        {% elif conv.prazo <= 60 and conv.prazo > 30 %}
-          <td><p align = "center" class="bg-warning text-dark font-weight-bold"> {{conv.DIA_FIM_VIGENC_CONV.strftime('%d/%m/%Y')}} </p></td>
-        {% elif conv.prazo <= 90 and conv.prazo > 60 %}
-          <td><p align = "center" class="bg-secondary text-white font-weight-bold"> {{conv.DIA_FIM_VIGENC_CONV.strftime('%d/%m/%Y')}} </p></td>
-        {% else %}
-          <td><p align = "center"> 
-            {% if conv.VL_CONTRAPARTIDA_CONV != None %}
-              {{conv.DIA_FIM_VIGENC_CONV.strftime('%d/%m/%Y')}}
-            {% else %} 
-              N.I.
-            {% endif %}
-          </p></td>
-        {% endif %}
-
-        <td><p align = "right">
-          {% if conv.VL_REPASSE_CONV != None %}
-            {{conv.VL_REPASSE_CONV|converte_para_real}}
-          {% else %} 
-            0,00
-          {% endif %}
-        </p></td>
-
-        <td><p align = "right">
-          {% if conv.VL_DESEMBOLSADO_CONV != None %}
-            {{conv.VL_DESEMBOLSADO_CONV|converte_para_real}}
-          {% else %} 
-            0,00
-          {% endif %}
-
-          {% if conv.VL_REPASSE_CONV == 0 or conv.VL_REPASSE_CONV == None %}
-            (<span class="text-danger">0 %</span>)
-          {% else %}
-            {% if (100*conv.VL_DESEMBOLSADO_CONV/conv.VL_REPASSE_CONV) == 100 %}
-              (<span class="text-success">{{(100*conv.VL_DESEMBOLSADO_CONV/conv.VL_REPASSE_CONV)|round|int}} %</span>)
-            {% else %}
-              (<span class="text-danger">{{(100*conv.VL_DESEMBOLSADO_CONV/conv.VL_REPASSE_CONV)|round|int}} %</span>)
-            {% endif %}
-          {% endif %}
-        </p></td>
-
-        <td><p align = "right"> 
-          {% if conv.VL_CONTRAPARTIDA_CONV != None %}
-            {{conv.VL_CONTRAPARTIDA_CONV|converte_para_real}}
-          {% else %} 
-            0,00
-          {% endif %} 
-        </p></td>
-
-        <td><p align = "right"> 
-          {% if conv.VL_INGRESSO_CONTRAPARTIDA != None %}
-            {{conv.VL_INGRESSO_CONTRAPARTIDA|converte_para_real}}
-          {% else %} 
-            0,00
-          {% endif %} 
-
-          {% if conv.VL_CONTRAPARTIDA_CONV == 0 or conv.VL_CONTRAPARTIDA_CONV == None %}
-            (<span class="text-danger">0 %</span>)
-          {% else %}
-            {% if (100*conv.VL_INGRESSO_CONTRAPARTIDA/conv.VL_CONTRAPARTIDA_CONV) == 100 %}
-              (<span class="text-success">{{(100*conv.VL_INGRESSO_CONTRAPARTIDA/conv.VL_CONTRAPARTIDA_CONV)|round|int}} %</span>)
-            {% else %}
-              (<span class="text-danger">{{(100*conv.VL_INGRESSO_CONTRAPARTIDA/conv.VL_CONTRAPARTIDA_CONV)|round|int}} %</span>)
-            {% endif %}
-          {% endif %}
-        </p></td>
-
-      </tr>
-
-      {% endfor %}
-    </tbody>
-
-  </table>
-</div>
-
-
 </div>
 {% endblock %}

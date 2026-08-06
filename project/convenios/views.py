@@ -114,14 +114,18 @@ def prog_pref_update(cod_prog):
 ## lista convênios
 
 @convenios.route('/<lista>/<coord>/lista_convenios_SICONV', methods=['GET', 'POST'])
+@login_required
 def lista_convenios_SICONV(lista,coord):
     """
     +---------------------------------------------------------------------------------------+
-    |Apresenta uma lista dos convênios.                                                     |
-    |                                                                                       |
+    |Apresenta uma lista dos convênios (Gestão de Convênios), com paginação, ordenação por  |
+    |clique no cabeçalho, filtros (situação, UF, programa, busca) e exportação CSV — mesmo   |
+    |padrão já usado na Gestão de TED (item B13 do backlog).                                 |
     +---------------------------------------------------------------------------------------+
     """
-
+    # Bug real corrigido: faltava @login_required nesta rota, mas ela usa
+    # current_user.id/coord incondicionalmente logo abaixo — um acesso anônimo
+    # derrubava a página com AttributeError em vez de redirecionar pro login.
     unidade_coord = services.coord_do_usuario(current_user.id)
 
     form = ListaForm()
@@ -135,14 +139,32 @@ def lista_convenios_SICONV(lista,coord):
 
         return redirect(url_for('convenios.lista_convenios_SICONV',lista=lista,coord=coord_form))
 
-    convenio, coord_normalizado, data_carga = services.listar_convenios_siconv(lista, coord, unidade_coord)
+    filtros = {
+        'situacao': request.args.get('situacao') or None,
+        'uf': request.args.get('uf') or None,
+        'programa': request.args.get('programa') or None,
+        'busca': request.args.get('busca') or None,
+    }
+    page = request.args.get('page', 1, type=int)
+    sort = request.args.get('sort') or None
+    direcao = request.args.get('dir') or 'asc'
+
+    convenio, paginacao, coord_normalizado, data_carga = services.listar_convenios_siconv(
+        lista, coord, unidade_coord, filtros=filtros, page=page, sort=sort, direcao=direcao)
     form.coord.data = coord_normalizado
+    opcoes = services.opcoes_filtro_convenios()
 
     return render_template('list_convenios.html', convenio = convenio,
-                                                  quantidade = len(convenio),
+                                                  quantidade = paginacao['total'],
                                                   lista = lista,
+                                                  coord = coord,
                                                   form = form,
-                                                  data_carga = data_carga)
+                                                  data_carga = data_carga,
+                                                  filtros = filtros,
+                                                  paginacao = paginacao,
+                                                  sort = sort,
+                                                  direcao = direcao,
+                                                  **opcoes)
 
 #
 ## Mostra detalhes SICONV de um convênio e permite alterar dados SEI
@@ -349,32 +371,38 @@ def msg_siconv ():
 #
 ## quadro dos convênios
 
-@convenios.route('/quadro_convenios')
-def quadro_convenios():
-    """
-    +---------------------------------------------------------------------------------------+
-    |Apresenta um quadro de convênios selecionáveis por UF e Programa que estejam           |
-    |em execução.                                                                           |
-    +---------------------------------------------------------------------------------------+
-    """
-    dados = services.quadro_convenios(current_user.coord)
-
-    return render_template('quadro_convenios.html', **dados)
+# Desativado em favor do BI Convênios (ver proposta_melhorias.md, item B5) —
+# mantido comentado, não removido, mesmo padrão já aplicado em Acordos
+# (project/acordos/views.py, quadro_acordos).
+# @convenios.route('/quadro_convenios')
+# def quadro_convenios():
+#     """
+#     +---------------------------------------------------------------------------------------+
+#     |Apresenta um quadro de convênios selecionáveis por UF e Programa que estejam           |
+#     |em execução.                                                                           |
+#     +---------------------------------------------------------------------------------------+
+#     """
+#     dados = services.quadro_convenios(current_user.coord)
+#
+#     return render_template('quadro_convenios.html', **dados)
 
 #
 ## convênios no mapa do Brasil
 
-@convenios.route('/brasil_convenios')
-def brasil_convenios():
-    """
-    +---------------------------------------------------------------------------------------+
-    |Apresenta um mapa onde se pode verificar os convênios por UF.                          |
-    |Para constar no mapa, o convênio deve ter dados sei.                                   |
-    +---------------------------------------------------------------------------------------+
-    """
-    mapa_html = services.gerar_mapa_brasil_convenios()
-
-    return render_template('brasil_convenios.html', m=mapa_html)
+# Desativado em favor do BI Convênios (ver proposta_melhorias.md, item B7) —
+# mantido comentado, não removido, mesmo padrão já aplicado em Acordos
+# (project/acordos/views.py, brasil_acordos).
+# @convenios.route('/brasil_convenios')
+# def brasil_convenios():
+#     """
+#     +---------------------------------------------------------------------------------------+
+#     |Apresenta um mapa onde se pode verificar os convênios por UF.                          |
+#     |Para constar no mapa, o convênio deve ter dados sei.                                   |
+#     +---------------------------------------------------------------------------------------+
+#     """
+#     mapa_html = services.gerar_mapa_brasil_convenios()
+#
+#     return render_template('brasil_convenios.html', m=mapa_html)
 #
 ## lista convênios do quadro por UF e por programa
 
@@ -423,17 +451,20 @@ def lista_convenios_prog(programa):
 #
 ## RESUMO convênios
 
-@convenios.route('/resumo_convenios')
-def resumo_convenios():
-    """
-    +---------------------------------------------------------------------------------------+
-    |Apresenta um resumo dos convênios por programa da coordenação.                         |
-    |                                                                                       |
-    +---------------------------------------------------------------------------------------+
-    """
-    programas_s, data_carga = services.resumo_convenios(current_user.coord)
-
-    return render_template('resumo_convenios.html', programas=programas_s, data_carga=data_carga)
+# Desativado em favor do BI Convênios (ver proposta_melhorias.md, item B6) —
+# mantido comentado, não removido, mesmo padrão já aplicado em Acordos
+# (project/acordos/views.py, resumo_acordos).
+# @convenios.route('/resumo_convenios')
+# def resumo_convenios():
+#     """
+#     +---------------------------------------------------------------------------------------+
+#     |Apresenta um resumo dos convênios por programa da coordenação.                         |
+#     |                                                                                       |
+#     +---------------------------------------------------------------------------------------+
+#     """
+#     programas_s, data_carga = services.resumo_convenios(current_user.coord)
+#
+#     return render_template('resumo_convenios.html', programas=programas_s, data_carga=data_carga)
 
 #
 ## BI de convênios (Etapa 1 do roadmap_bi_sistac.md) — visão consolidada, sem
@@ -457,6 +488,8 @@ def bi_convenios():
     filtros = {
         'programa': request.args.get('programa') or None,
         'uf': request.args.get('uf') or None,
+        'regiao': request.args.get('regiao') or None,
+        'coord': request.args.get('coord') or None,
         'parceiro': request.args.get('parceiro') or None,
         'situacao': request.args.get('situacao') or None,
         'ano': request.args.get('ano') or None,
