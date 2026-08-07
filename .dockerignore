@@ -1,0 +1,29 @@
+# Nunca inclui a pasta .git na imagem — evita embutir todo o histórico do
+# repositório (incluindo commits antigos com segredos já expostos) dentro
+# da imagem Docker.
+.git
+.gitignore
+
+# Ambiente virtual local (recriado dentro da imagem via requirements.txt)
+venv/
+.venv/
+
+# Cache/artefatos de desenvolvimento, sem utilidade dentro da imagem
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Arquivos de dado local/pessoal, nunca devem ir pra imagem
+*.xlsx
+*.xls
+*.csv
+carga_pdctr_direta.py
+
+# Documentação e planejamento — não fazem parte da aplicação em si
+*.md
+atualizações.txt
+
+# Ambiente de desenvolvimento / IDE
+.vscode/
+.devcontainer/
