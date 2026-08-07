@@ -1,5 +1,44 @@
 ## Atualizações ##
 
+06/08/2026
+Nova frente de BI (Business Intelligence): painéis consolidados de Convênios,
+Acordos e TED, mais um Painel Executivo consolidando os três por Programa CNPq
+(valores de Captação via TED e Execução via Convênio/Acordo mostrados sempre
+separados, nunca somados, para não contar o mesmo recurso duas vezes).
+Novo módulo TED: tela de Gestão completa (carga automática diária da API aberta
+do TransfereGov, paginação, ordenação, filtros, exportação CSV, cores por
+proximidade de vencimento) e curadoria de vínculo a Programa CNPq e a
+Acordo/Convênio.
+Curadoria de vínculo entre pagamentos de bolsistas (Processo-Mãe) e Acordo,
+parcialmente automatizada por similaridade (nome da FAP, chamada, UF), com fila
+de revisão manual para os casos sem correspondência confiável.
+Cada módulo (Convênios, Acordos, TED) passa a ter dois controles independentes
+para o Admin Master: habilitar a Gestão (como já existia) e habilitar o BI
+(novo, público, sem exigir login, ligado por padrão).
+Carga real de folha de pagamento de bolsistas (planilha da COSAO) migrada para
+ler arquivos .xlsx (antes só lia o formato antigo .xls); mesma correção
+aplicada à carga de situações do SIGEF. As duas cargas agora aparecem no menu
+"Carga", antes só acessíveis digitando o endereço diretamente.
+Menus de Convênios e Acordos reorganizados (renomeações, remoção das telas de
+dashboard antigas do menu — o código continua preservado, só não fica mais
+navegável — substituídas pelo BI novo).
+Corrigido erro grave que impedia abrir a tela de editar um Acordo ou Convênio
+quando algum valor monetário estava em branco no cadastro.
+Corrigido cálculo que comparava incorretamente Capital+Custeio+Bolsas de um
+Acordo somando o valor da EP, quando esses campos são exclusivos do CNPq.
+Corrigida a URL de carga do SICONV, migrada para o novo endereço do
+TransfereGov (o antigo foi descontinuado pelo próprio governo federal).
+Corrigido caminho de arquivos estáticos fixo em local exclusivo do ambiente de
+produção, que impedia o download de CSVs e o carregamento do logo do CNPq fora
+desse ambiente específico.
+
+Nota: a versão 5.0.14 (abaixo) nunca chegou a ser publicada isoladamente em
+produção — produção seguiu na 5.0.13 até esta atualização. Todo o conteúdo da
+5.0.14 está incluído nesta versão. A partir de agora, o versionamento segue
+MAIOR.MENOR.PATCH: MAIOR = mudança de tecnologia/base, MENOR = adição de
+funcionalidade, PATCH = correção/ajuste incremental.
+v5.1.0
+
 29/07/2026
 Criação do papel Admin Master: tela "Dados gerais do sistema" (funcionalidades de
 Convênios/Acordos/Instrumentos, texto da página Sobre) restrita a esse papel, com

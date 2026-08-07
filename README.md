@@ -33,7 +33,7 @@ python app.py
 
 ## Versão atual
 
-v5.0.14
+v5.1.0
 
 ## Como contribuir
 1. Faça um fork do repositório
