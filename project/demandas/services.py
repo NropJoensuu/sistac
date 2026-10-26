@@ -22,12 +22,9 @@ from sqlalchemy import or_, func
 
 import os
 import sys
-import pickle
 from datetime import date, timedelta
 from calendar import monthrange
 
-from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
 from fpdf import FPDF
 
 from project import db, mail, app
@@ -1484,72 +1481,12 @@ def _notificar_providencia_alheia(demanda, atividade_id, usuario):
         db.session.commit()
 
 
-def _agendar_no_google_calendar(demanda, data_hora, duracao, texto):
-    """
-    +---------------------------------------------------------------------------------------+
-    | ATENÇÃO — funcionalidade preservada como estava, mas NÃO FUNCIONAL num servidor web:  |
-    | `flow.run_console()` implementa um fluxo OAuth interativo por linha de comando, que    |
-    | não tem como funcionar dentro de uma requisição HTTP de um servidor Flask (não há      |
-    | console para o usuário interagir). Mantido sem alteração — corrigir isso exigiria      |
-    | trocar para um fluxo OAuth web completo, o que é uma mudança de funcionalidade, não     |
-    | uma correção de bug simples. O caminho '/temp/token.pkl' também tem o mesmo problema    |
-    | de portabilidade já visto em outros pontos do sistema ('/temp' não é '/tmp').           |
-    +---------------------------------------------------------------------------------------+
-    """
-    scopes = ['https://www.googleapis.com/auth/calendar.events']
-
-    if getattr(sys, 'frozen', False):
-        base_path = sys._MEIPASS
-        client_file = os.path.join(base_path, 'client.json')
-    else:
-        client_file = 'client.json'
-
-    flow = InstalledAppFlow.from_client_secrets_file(client_file, scopes=scopes)
-
-    pasta_token_antiga = os.path.normpath('/temp/token.pkl')
-    pasta_token = os.path.normpath('/temp/token/token.pkl')
-
-    if os.path.exists(pasta_token_antiga):
-        os.makedirs(os.path.normpath('/temp/token/'))
-        os.system('copy ' + pasta_token_antiga + ' ' + pasta_token)
-        os.remove(pasta_token_antiga)
-
-    if os.path.exists(pasta_token):
-        credentials = pickle.load(open(pasta_token, "rb"))
-    else:
-        credentials = flow.run_console()
-        pickle.dump(credentials, open(pasta_token, "wb"))
-
-    service = build("calendar", "v3", credentials=credentials)
-
-    ini = data_hora
-    fim = ini + timedelta(minutes=duracao)
-    timezone = 'America/Sao_Paulo'
-
-    event = {
-        'summary': 'Demanda ' + str(demanda.id) + ' - Providência agendada',
-        'location': 'CNPq',
-        'description': texto,
-        'start': {'dateTime': ini.strftime("%Y-%m-%dT%H:%M:%S"), 'timeZone': timezone},
-        'end': {'dateTime': fim.strftime("%Y-%m-%dT%H:%M:%S"), 'timeZone': timezone},
-        'reminders': {
-            'useDefault': False,
-            'overrides': [
-                {'method': 'email', 'minutes': 24 * 60},
-                {'method': 'popup', 'minutes': 15},
-            ],
-        },
-    }
-
-    service.events().insert(calendarId='primary', body=event).execute()
-
-
 def criar_providencia(demanda_id, data_hora, texto, duracao, passo_data, necessita_despacho,
                        conclu, agenda, usuario):
     """
     Registra uma providência para uma demanda, com toda a lógica de
-    notificação por e-mail e (opcionalmente) agendamento no Google
-    Calendar. Retorna uma tupla (demanda, agendada).
+    notificação por e-mail.
+    Retorna uma tupla (demanda, agendada); agendada é sempre False.
     """
     demanda = Demanda.query.get_or_404(demanda_id)
 
@@ -1597,10 +1534,10 @@ def criar_providencia(demanda_id, data_hora, texto, duracao, passo_data, necessi
     if demanda.user_id != usuario.id:
         _notificar_providencia_alheia(demanda, demanda.programa, usuario)
 
+    # O agendamento no Google Calendar foi removido: nunca funcionou no servidor
+    # web (usava um fluxo OAuth de console) e dependia do client.json, que foi
+    # retirado do repositório. O parâmetro `agenda` é mantido por compatibilidade.
     agendada = False
-    if programada == 1 and agenda:
-        _agendar_no_google_calendar(demanda, data_hora, duracao, texto)
-        agendada = True
 
     return demanda, agendada
 
