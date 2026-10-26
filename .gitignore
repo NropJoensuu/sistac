@@ -31,3 +31,6 @@
 /*.xlsx
 /carga_log.txt
 /carga_pdctr_output*.log
+# credenciais Google (nunca versionar)
+/client.json
+/token.pickle
